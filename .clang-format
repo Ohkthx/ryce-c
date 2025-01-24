@@ -1,3 +1,12 @@
 IndentWidth: 4
 # IndentPPDirectives: BeforeHash
-ColumnLimit: 100
+ColumnLimit: 120
+# Language: C
+PointerAlignment: Right
+# ReflowComments: true
+# SortIncludes: true
+# SortUsingDeclarations: false
+# SpaceAfterCStyleCast: false
+# Standard: c23
+# TabWidth: 8
+# UseTab: Never

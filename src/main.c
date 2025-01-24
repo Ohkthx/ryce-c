@@ -1,4 +1,5 @@
-// #define TUI_WIDE_CHAR_SUPPORT 1
+// #define TUI_WIDE_CHAR_SUPPORT (1)
+#define RYCE_TUI_IMPLEMENTATION (1)
 
 #include "tui.h"
 #include <stdio.h>
@@ -6,14 +7,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-/**
- * @brief Clears the terminal screen.
- */
-void clear_screen() {
-    printf("\033[2J");
-    printf("\033[0;0H");
-    fflush(stdout);
-}
+const size_t ALPHABET_SIZE = 26;
+const double SCREEN_CHANGES = 0.1;
 
 /**
  * @brief Performs the actions for the tick.
@@ -21,17 +16,17 @@ void clear_screen() {
  * @param tui TUI to render.
  * @param changes Amount of changes to make per tick.
  */
-void tick_action(Tui *tui, int changes) {
+void tick_action(RYCE_TuiController *tui, int changes) {
     for (int i = 0; i < changes; i++) {
         // Randomly change a character in the update buffer.
-        wchar_t c = (rand() % 2 == 0 ? L'A' : L'a') + (rand() % 26);
+        wchar_t c = (rand() % 2 == 0 ? L'A' : L'a') + (rand() % ALPHABET_SIZE);
         tui->pane->update[rand() % tui->pane->length] = c;
     }
 
     // Render changes.
-    int err_code = TUI_render(tui);
-    if (err_code != 0) {
-        clear_screen();
+    RYCE_TuiError err_code = ryce_render_tui(tui);
+    if (err_code != RYCE_TUI_ERR_NONE) {
+        ryce_clear_screen();
         fprintf(stderr, "Failed to render TUI: %d\n", err_code);
     }
 }
@@ -41,19 +36,20 @@ int main(void) {
     const int TICK_INTERVAL = 1000000 / TICKS_PER_SECOND;
 
     // Initialize a TUI to demonstrate rendering.
-    Tui *tui = TUI_init(120, 40); // 170, 54
+    RYCE_TuiController *tui = ryce_init_controller(120, 40); // 170, 54
     if (!tui) {
         fprintf(stderr, "Failed to init TUI.\n");
         return EXIT_FAILURE;
     }
 
-    clear_screen();
-    srand((unsigned)time(NULL));
+    ryce_clear_screen();
+    srand((unsigned)time(nullptr));
 
     // Timing variables.
-    struct timeval start_time, end_time;
+    struct timeval start_time;
+    struct timeval end_time;
     // int changes = (int)tui->max_length * 0.001;
-    int changes = (int)tui->max_length * 0.1;
+    int changes = (int)tui->max_length * SCREEN_CHANGES;
 
     while (1) {
         // Get the start time.
@@ -64,8 +60,7 @@ int main(void) {
 
         // Get elapsed time.
         gettimeofday(&end_time, NULL);
-        long elapsed = (end_time.tv_sec - start_time.tv_sec) * 1000000L +
-                       (end_time.tv_usec - start_time.tv_usec);
+        long elapsed = ((end_time.tv_sec - start_time.tv_sec) * 1000000L) + (end_time.tv_usec - start_time.tv_usec);
 
         // If we finished our tick early, sleep for the difference.
         if (elapsed < TICK_INTERVAL) {
@@ -76,6 +71,6 @@ int main(void) {
         }
     }
 
-    TUI_free(tui);
+    ryce_free_controller(tui);
     return 0;
 }

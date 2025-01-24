@@ -1,10 +1,12 @@
 # Personal / Project Specific
 notes.txt
-commit_msg
+commit_message
 .vscode/
+.cache/
 backup/
 build/
 bin/
+obj/
 
 # Prerequisites
 *.d
