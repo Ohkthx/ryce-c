@@ -1,3 +1,5 @@
+#ifndef RYCE_TUI_H
+
 /*
     RyCE TUI - A single-header, STB-styled terminal UI library.
 
@@ -5,18 +7,15 @@
 
     1) In exactly ONE of your .c or .cpp files, do:
 
-       #define RYCE_TUI_IMPLEMENTATION
+       #define RYCE_TUI_IMPL
        #include "tui.h"
 
     2) In as many other files as you need, just #include "tui.h"
-       WITHOUT defining RYCE_TUI_IMPLEMENTATION.
+       WITHOUT defining RYCE_TUI_IMPL.
 
     3) Compile and link all files together.
 */
-
-#ifndef RYCE_TUI_H
-#define RYCE_TUI_H
-
+#define RYCE_TUI_H (1)
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -80,6 +79,14 @@
 #define RYCE_ANSI_MOVE_BUFFER_SIZE 32
 #define RYCE_MIN_BUFFER_SIZE 1024
 
+// Visibility macros.
+#ifndef RYCE_PUBLIC_DECL
+#define RYCE_PUBLIC_DECL extern
+#endif
+#ifndef RYCE_PRIVATE_DECL
+#define RYCE_PRIVATE_DECL static
+#endif
+
 // Error Codes.
 typedef enum RYCE_TuiError {
     RYCE_TUI_ERR_NONE,                  ///< No error.
@@ -88,6 +95,7 @@ typedef enum RYCE_TuiError {
     RYCE_TUI_ERR_INVALID_BUFFER,        ///< Invalid buffer pointer.
     RYCE_TUI_ERR_MOVE_BUFFER_OVERFLOW,  ///< Move buffer overflow.
     RYCE_TUI_ERR_WRITE_BUFFER_OVERFLOW, ///< Write buffer overflow.
+    RYCE_TUI_ERR_STDOUT_FLUSH_FAILED,   ///< Failed to flush stdout.
 } RYCE_TuiError;
 
 /*
@@ -113,14 +121,14 @@ typedef struct RYCE_Pane {
     RYCE_CHAR *cache;  ///< Last rendered buffer.
 } RYCE_Pane;
 
-typedef struct RYCE_TuiController {
+typedef struct RYCE_TuiContext {
     RYCE_CursorPosition cursor;                        ///< Current cursor position.
     RYCE_CHAR move_buffer[RYCE_ANSI_MOVE_BUFFER_SIZE]; ///< Buffer to store move sequences.
     RYCE_Pane *pane;                                   ///< Current pane.
     size_t max_length;                                 ///< Maximum length of the write_buffer.
     size_t write_length;                               ///< Current length of the write_buffer.
     RYCE_CHAR *write_buffer;                           ///< Buffer that stores differences to be written.
-} RYCE_TuiController;
+} RYCE_TuiContext;
 
 /*
     Public API Functions.
@@ -129,7 +137,7 @@ typedef struct RYCE_TuiController {
 /**
  * @brief Performs a `clear` or `cls` using ANSI escape sequences.
  */
-void ryce_clear_screen(void);
+RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_screen(void);
 
 /**
  * @brief Initializes a pane and fills its buffers with default values.
@@ -138,33 +146,33 @@ void ryce_clear_screen(void);
  * @param height Height of the pane.
  * @return Pane* Pointer to the initialized pane.
  */
-RYCE_Pane *ryce_init_pane(size_t width, size_t height);
+RYCE_PUBLIC_DECL RYCE_Pane *ryce_init_pane(size_t width, size_t height);
 
 /**
  * @brief Initializes the Text UI Controller with a pane and a buffer to store changes.
  *
  * @param width Width of the interface to be rendered.
  * @param height Height of the interface to be rendered.
- * @return TuiController* Pointer to the initialized controller.
+ * @return RYCE_TuiContext* Pointer to the initialized controller.
  */
-RYCE_TuiController *ryce_init_controller(size_t width, size_t height);
+RYCE_PUBLIC_DECL RYCE_TuiContext *ryce_init_tui_ctx(size_t width, size_t height);
 
 /**
  * @brief Frees the memory allocated for a Pane.
  */
-void ryce_free_pane(RYCE_Pane *pane);
+RYCE_PUBLIC_DECL void ryce_free_pane(RYCE_Pane *pane);
 
 /**
  * @brief Frees the memory allocated for a TUI.
  */
-void ryce_free_controller(RYCE_TuiController *tui);
+RYCE_PUBLIC_DECL void ryce_free_ctx(RYCE_TuiContext *tui);
 
 /**
  * @brief Renders the TUI and all panes to the terminal.
 
  * @return RYCE_TuiError RYCE_TUI_ERR_NONE if successful, otherwise an error code.
  */
-RYCE_TuiError ryce_render_tui(RYCE_TuiController *tui);
+RYCE_PUBLIC_DECL RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui);
 
 #endif // RYCE_TUI_H
 
@@ -174,17 +182,21 @@ RYCE_TuiError ryce_render_tui(RYCE_TuiController *tui);
      █  ▐▌  ▐▌▐▛▀▘ ▐▌   ▐▛▀▀▘▐▌  ▐▌▐▛▀▀▘▐▌ ▝▜▌  █  ▐▛▀▜▌  █    █  ▐▌ ▐▌▐▌ ▝▜▌
    ▗▄█▄▖▐▌  ▐▌▐▌   ▐▙▄▄▖▐▙▄▄▖▐▌  ▐▌▐▙▄▄▖▐▌  ▐▌  █  ▐▌ ▐▌  █  ▗▄█▄▖▝▚▄▞▘▐▌  ▐▌
    IMPLEMENTATION
-   Provide function definitions only if RYCE_TUI_IMPLEMENTATION is defined.
+   Provide function definitions only if RYCE_TUI_IMPL is defined.
   ===========================================================================*/
-#ifdef RYCE_TUI_IMPLEMENTATION
+#ifdef RYCE_TUI_IMPL
 
 #include <math.h> // log10
 
-static size_t ryce_count_digits_internal(size_t num) { return num == 0 ? 1 : (size_t)log10((double)num) + 1; }
+RYCE_PRIVATE_DECL size_t ryce_count_digits_internal(const size_t num) {
+    return num == 0 ? 1 : (size_t)log10((double)num) + 1;
+}
 
-static bool ryce_is_pane_init_internal(RYCE_Pane *pane) { return (bool)(pane && pane->update && pane->cache); }
+RYCE_PRIVATE_DECL bool ryce_is_pane_init_internal(RYCE_Pane *pane) {
+    return (bool)(pane && pane->update && pane->cache);
+}
 
-static void ryce_softreset_controller_internal(RYCE_TuiController *tui) {
+RYCE_PRIVATE_DECL void ryce_softreset_controller_internal(RYCE_TuiContext *tui) {
     if (!tui) {
         return;
     }
@@ -196,7 +208,7 @@ static void ryce_softreset_controller_internal(RYCE_TuiController *tui) {
     tui->move_buffer[0] = RYCE_NULL_CHAR;
 }
 
-static RYCE_TuiError ryce_write_move_internal(RYCE_TuiController *tui, size_t x, size_t y) {
+RYCE_PRIVATE_DECL RYCE_TuiError ryce_write_move_internal(RYCE_TuiContext *tui, const size_t x, const size_t y) {
     if (!tui) {
         return RYCE_TUI_ERR_INVALID_TUI;
     }
@@ -216,8 +228,8 @@ static RYCE_TuiError ryce_write_move_internal(RYCE_TuiController *tui, size_t x,
     return RYCE_TUI_ERR_NONE;
 }
 
-static RYCE_TuiError ryce_inject_sequence_internal(RYCE_TuiController *tui, size_t x, size_t y,
-                                                   RYCE_SkipSequence *skip) {
+RYCE_PRIVATE_DECL RYCE_TuiError ryce_inject_sequence_internal(RYCE_TuiContext *tui, const size_t x, const size_t y,
+                                                              RYCE_SkipSequence *skip) {
     if (tui->cursor.y != y) {
         // Move the cursor to the correct roki.
         RYCE_TuiError err_code = ryce_write_move_internal(tui, x, y);
@@ -255,12 +267,16 @@ static RYCE_TuiError ryce_inject_sequence_internal(RYCE_TuiController *tui, size
     return RYCE_TUI_ERR_NONE;
 }
 
-void ryce_clear_screen(void) {
+RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_screen(void) {
     RYCE_PRINTF(RYCE_CSI "2J" RYCE_CSI "0;0H");
-    fflush(stdout);
+    if (fflush(stdout) != 0) {
+        return RYCE_TUI_ERR_STDOUT_FLUSH_FAILED;
+    }
+
+    return RYCE_TUI_ERR_NONE;
 }
 
-RYCE_Pane *ryce_init_pane(size_t width, size_t height) {
+RYCE_PUBLIC_DECL RYCE_Pane *ryce_init_pane(const size_t width, const size_t height) {
     if (width == 0 || height == 0) {
         return nullptr;
     }
@@ -284,12 +300,12 @@ RYCE_Pane *ryce_init_pane(size_t width, size_t height) {
     return pane;
 }
 
-RYCE_TuiController *ryce_init_controller(size_t width, size_t height) {
+RYCE_PUBLIC_DECL RYCE_TuiContext *ryce_init_tui_ctx(const size_t width, const size_t height) {
     if (width == 0 || height == 0) {
         return nullptr;
     }
 
-    RYCE_TuiController *tui = (RYCE_TuiController *)malloc(sizeof(RYCE_TuiController));
+    RYCE_TuiContext *tui = (RYCE_TuiContext *)malloc(sizeof(RYCE_TuiContext));
     if (!tui) {
         return nullptr;
     }
@@ -320,7 +336,7 @@ RYCE_TuiController *ryce_init_controller(size_t width, size_t height) {
     return tui;
 }
 
-void ryce_free_pane(RYCE_Pane *pane) {
+RYCE_PUBLIC_DECL void ryce_free_pane(RYCE_Pane *pane) {
     if (!pane) {
         return;
     }
@@ -328,7 +344,7 @@ void ryce_free_pane(RYCE_Pane *pane) {
     free(pane);
 }
 
-void ryce_free_controller(RYCE_TuiController *tui) {
+RYCE_PUBLIC_DECL void ryce_free_ctx(RYCE_TuiContext *tui) {
     if (!tui) {
         return;
     }
@@ -338,7 +354,7 @@ void ryce_free_controller(RYCE_TuiController *tui) {
     free(tui);
 }
 
-RYCE_TuiError ryce_render_tui(RYCE_TuiController *tui) {
+RYCE_PUBLIC_DECL RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui) {
     if (!tui) {
         return RYCE_TUI_ERR_INVALID_TUI;
     } else if (!ryce_is_pane_init_internal(tui->pane)) {
@@ -395,9 +411,11 @@ RYCE_TuiError ryce_render_tui(RYCE_TuiController *tui) {
     tui->cursor.x = tui->pane->width;
     tui->cursor.y = tui->pane->height;
     RYCE_PRINTF(RYCE_BUFFER_FMT, tui->write_buffer, (RYCE_SIZE_T)tui->cursor.y, (RYCE_SIZE_T)tui->cursor.x);
-    fflush(stdout);
+    if (fflush(stdout) != 0) {
+        return RYCE_TUI_ERR_STDOUT_FLUSH_FAILED;
+    }
 
     return RYCE_TUI_ERR_NONE;
 }
 
-#endif // RYCE_TUI_IMPLEMENTATION
+#endif // RYCE_TUI_IMPL

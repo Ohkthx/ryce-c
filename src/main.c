@@ -1,6 +1,8 @@
 // #define TUI_WIDE_CHAR_SUPPORT (1)
-#define RYCE_TUI_IMPLEMENTATION (1)
+#define RYCE_LOOP_IMPL
+#define RYCE_TUI_IMPL
 
+#include "loop.h"
 #include "tui.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,7 +10,18 @@
 #include <unistd.h>
 
 const size_t ALPHABET_SIZE = 26;
-const double SCREEN_CHANGES = 0.1;
+const size_t SCREEN_WIDTH = 170; // 170
+const size_t SCREEN_HEIGHT = 20; // 54
+const double SCREEN_CHANGES = 0.0001;
+const int TICKS_PER_SECOND = 1;
+const int TICK_INTERVAL = 1000000 / TICKS_PER_SECOND;
+
+volatile sig_atomic_t lock = 1;
+void handle_sigint(int sig) {
+    (void)sig;
+    lock = 0;
+    fflush(stdout);
+}
 
 /**
  * @brief Performs the actions for the tick.
@@ -16,7 +29,8 @@ const double SCREEN_CHANGES = 0.1;
  * @param tui TUI to render.
  * @param changes Amount of changes to make per tick.
  */
-void tick_action(RYCE_TuiController *tui, int changes) {
+void tick_action(RYCE_TuiContext *tui) {
+    int changes = (int)tui->max_length * SCREEN_CHANGES;
     for (int i = 0; i < changes; i++) {
         // Randomly change a character in the update buffer.
         wchar_t c = (rand() % 2 == 0 ? L'A' : L'a') + (rand() % ALPHABET_SIZE);
@@ -32,45 +46,27 @@ void tick_action(RYCE_TuiController *tui, int changes) {
 }
 
 int main(void) {
-    const int TICKS_PER_SECOND = 64;
-    const int TICK_INTERVAL = 1000000 / TICKS_PER_SECOND;
+    srand((unsigned)time(nullptr));
 
     // Initialize a TUI to demonstrate rendering.
-    RYCE_TuiController *tui = ryce_init_controller(120, 40); // 170, 54
+    RYCE_TuiContext *tui = ryce_init_tui_ctx(SCREEN_WIDTH, SCREEN_HEIGHT);
     if (!tui) {
         fprintf(stderr, "Failed to init TUI.\n");
         return EXIT_FAILURE;
     }
 
-    ryce_clear_screen();
-    srand((unsigned)time(nullptr));
-
-    // Timing variables.
-    struct timeval start_time;
-    struct timeval end_time;
-    // int changes = (int)tui->max_length * 0.001;
-    int changes = (int)tui->max_length * SCREEN_CHANGES;
-
-    while (1) {
-        // Get the start time.
-        gettimeofday(&start_time, NULL);
-
-        // Execute a TUI rendering iteration.
-        tick_action(tui, changes);
-
-        // Get elapsed time.
-        gettimeofday(&end_time, NULL);
-        long elapsed = ((end_time.tv_sec - start_time.tv_sec) * 1000000L) + (end_time.tv_usec - start_time.tv_usec);
-
-        // If we finished our tick early, sleep for the difference.
-        if (elapsed < TICK_INTERVAL) {
-            usleep(TICK_INTERVAL - elapsed);
-        } else {
-            fprintf(stderr, "Tick took too long: %ld\n", elapsed);
-            break;
-        }
+    // Initialize the loop context.
+    RYCE_LoopContext loop = {};
+    if (ryce_init_loop_ctx(&lock, TICKS_PER_SECOND, &loop) != RYCE_LOOP_ERR_NONE) {
+        fprintf(stderr, "Failed to init loop context.\n");
+        return EXIT_FAILURE;
     }
 
-    ryce_free_controller(tui);
+    ryce_clear_screen();
+    while (ryce_loop_tick(&loop) == RYCE_LOOP_ERR_NONE) {
+        tick_action(tui);
+    }
+
+    ryce_free_ctx(tui);
     return 0;
 }
