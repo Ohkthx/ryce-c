@@ -1,8 +1,8 @@
 #ifndef RYCE_LOOP_H
-#define RYCE_LOOP_IMPL
+#define RYCE_LOOP_H
 
 /*
-    RyCE Loop - A single-header, STB-styled core loop ctx.
+    RyCE Loop - A single-header, STB-styled core loop context.
 
     USAGE:
 
@@ -16,7 +16,7 @@
 
     3) Compile and link all files together.
 */
-#define RYCE_LOOP_H (1)
+
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
@@ -27,16 +27,13 @@
 #ifndef RYCE_PUBLIC_DECL
 #define RYCE_PUBLIC_DECL extern
 #endif
-#ifndef RYCE_PRIVATE_DECL
-#define RYCE_PRIVATE_DECL static
-#endif
 
 #define RYCE_TIME_NSEC 1'000'000'000L
 
 // Error Codes.
 typedef enum RYCE_LoopError {
     RYCE_LOOP_ERR_NONE,                ///< No error.
-    RYCE_LOOP_INVALID_SIGINT_POINTER,  ///< Invalid sigint pointer.
+    RYCE_LOOP_CAUGHT_SIGINT,           ///< Caught SIGINT.
     RYCE_LOOP_INVALID_TIMING,          ///< Invalid timing values.
     RYCE_LOOP_ERR_STDOUT_FLUSH_FAILED, ///< Failed to flush stdout.
 } RYCE_LoopError;
@@ -89,11 +86,7 @@ RYCE_PUBLIC_DECL RYCE_LoopError ryce_loop_tick(RYCE_LoopContext *ctx);
 #ifdef RYCE_LOOP_IMPL
 
 RYCE_PUBLIC_DECL RYCE_LoopError ryce_init_loop_ctx(volatile sig_atomic_t *sigint, size_t tps, RYCE_LoopContext *ctx) {
-    if (!sigint) {
-        return RYCE_LOOP_INVALID_SIGINT_POINTER;
-    }
-
-    tps = (tps > 0) ? tps : 1; // Prevent DIV by 0.
+    tps = tps > 0 ? tps : 1; // Prevent DIV by 0.
     *ctx = (RYCE_LoopContext){
         .sigint = sigint,
         .interval = {.tv_sec = 0, .tv_nsec = RYCE_TIME_NSEC / tps},
@@ -110,6 +103,10 @@ RYCE_PUBLIC_DECL RYCE_LoopError ryce_init_loop_ctx(volatile sig_atomic_t *sigint
 }
 
 RYCE_PUBLIC_DECL RYCE_LoopError ryce_loop_tick(RYCE_LoopContext *ctx) {
+    if (ctx->sigint != nullptr && *(ctx->sigint) == 1) {
+        return RYCE_LOOP_CAUGHT_SIGINT;
+    }
+
     struct timespec now;
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
         return RYCE_LOOP_INVALID_TIMING;

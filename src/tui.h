@@ -1,4 +1,5 @@
 #ifndef RYCE_TUI_H
+#define RYCE_TUI_H
 
 /*
     RyCE TUI - A single-header, STB-styled terminal UI library.
@@ -15,7 +16,7 @@
 
     3) Compile and link all files together.
 */
-#define RYCE_TUI_H (1)
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -34,8 +35,9 @@
 #define RYCE_SIZE_T unsigned long
 
 // Wide character functions.
-#define RYCE_PRINTF(fmt, ...) wprintf((fmt), ##__VA_ARGS__)
-#define RYCE_SNPRINTF(dst, n, fmt, ...) swprintf((dst), (n), (fmt), ##__VA_ARGS__)
+#define RYCE_PRINTF(...) wprintf(__VA_ARGS__)
+#define RYCE_SNPRINTF(...) swprintf(__VA_ARGS__)
+
 #define RYCE_STRLEN(s) wcslen(s)
 #define RYCE_MEMSET(dst, c, n) wmemset((dst), (wchar_t)(c), (n))
 #define RYCE_MEMCPY(dst, src, n) wmemcpy((dst), (src), (n))
@@ -50,8 +52,9 @@
 #define RYCE_SIZE_T size_t
 
 // Standard character functions.
-#define RYCE_PRINTF(fmt, ...) printf((fmt), ##__VA_ARGS__)
-#define RYCE_SNPRINTF(dst, n, fmt, ...) snprintf((dst), (n), (fmt), ##__VA_ARGS__)
+#define RYCE_PRINTF(...) printf(__VA_ARGS__)
+#define RYCE_SNPRINTF(...) snprintf(__VA_ARGS__)
+
 #define RYCE_STRLEN(s) strlen(s)
 #define RYCE_MEMSET(dst, c, n) memset((dst), (c), (n))
 #define RYCE_MEMCPY(dst, src, n) memcpy((dst), (src), (n))
@@ -165,7 +168,7 @@ RYCE_PUBLIC_DECL void ryce_free_pane(RYCE_Pane *pane);
 /**
  * @brief Frees the memory allocated for a TUI.
  */
-RYCE_PUBLIC_DECL void ryce_free_ctx(RYCE_TuiContext *tui);
+RYCE_PUBLIC_DECL void ryce_tui_free_ctx(RYCE_TuiContext *tui);
 
 /**
  * @brief Renders the TUI and all panes to the terminal.
@@ -344,7 +347,7 @@ RYCE_PUBLIC_DECL void ryce_free_pane(RYCE_Pane *pane) {
     free(pane);
 }
 
-RYCE_PUBLIC_DECL void ryce_free_ctx(RYCE_TuiContext *tui) {
+RYCE_PUBLIC_DECL void ryce_tui_free_ctx(RYCE_TuiContext *tui) {
     if (!tui) {
         return;
     }

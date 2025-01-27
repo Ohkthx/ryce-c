@@ -12,6 +12,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Destination for the compiled binary.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
 
+# Compile flags.
+set(CMAKE_C_FLAGS "--std=c23 -O -Wall -Wextra -Werror -Wpedantic -Wundef -Wshadow -fsanitize=address -fsanitize=undefined -pthread -g")
+
 # Source files.
 file(GLOB_RECURSE SRC_FILES
     "${PROJECT_SOURCE_DIR}/src/*.c"

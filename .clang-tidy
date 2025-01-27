@@ -1,5 +1,6 @@
 ---
 Checks: "*,
+        clang-analyzer-*,
         -abseil-*,
         -altera-*,
         -android-*,
