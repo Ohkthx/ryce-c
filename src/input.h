@@ -1,6 +1,5 @@
 #ifndef RYCE_INPUT_H
 #define RYCE_INPUT_H
-#define RYCE_INPUT_IMPL // For testing purposes.
 
 /*
     RyCE Input - A single-header, STB-styled input context.
@@ -67,8 +66,8 @@ typedef enum RYCE_InputError {
 } RYCE_InputError;
 
 typedef enum RYCE_InputEventType {
-    RYCE_EVENT_KEY,  // Represents a keyboard event
-    RYCE_EVENT_MOUSE // Represents a mouse event
+    RYCE_EVENT_KEY,  // Represents a keyboard event.
+    RYCE_EVENT_MOUSE // Represents a mouse event.
 } RYCE_InputEventType;
 
 /*
@@ -83,9 +82,10 @@ typedef struct RYCE_InputEvent {
     union {
         char key;
         struct {
-            int button; //< The button pressed on the mouse.
-            int x;      //< The x-coordinate of the mouse event.
-            int y;      //< The y-coordinate of the mouse event.
+            size_t button; //< The button pressed on the mouse.
+            bool released; //< Whether the button was released.
+            size_t x;      //< The x-coordinate of the mouse event.
+            size_t y;      //< The y-coordinate of the mouse event.
         } mouse;
     } data;
 } RYCE_InputEvent;
@@ -209,6 +209,7 @@ RYCE_PRIVATE_DECL RYCE_InputError ryce_input_parse_basic_mouse_internal(RYCE_Inp
         RYCE_InputEvent event = {
             .type = RYCE_EVENT_MOUSE,
             .data.mouse = {.button = seq[0] - ASCII_ENCODING_OFFSET,
+                           .released = (bool)(seq[0] - ASCII_ENCODING_OFFSET == 3),
                            .x = seq[1] - ASCII_ENCODING_OFFSET,
                            .y = seq[2] - ASCII_ENCODING_OFFSET},
         };
@@ -232,11 +233,13 @@ RYCE_PRIVATE_DECL RYCE_InputError ryce_input_parse_sgr_mouse_internal(RYCE_Input
     const size_t MAX_SGR_SEQ = 32;
     char seq[MAX_SGR_SEQ];
     size_t length = 0;
+    char button_state = 'M';
 
     // Read the three bytes for the basic mouse event.
     while (read(STDIN_FILENO, &seq[length], 1) == 1 && length < MAX_SGR_SEQ) {
         if (seq[length] == 'M' || seq[length] == 'm') {
             // Parse the SGR sequence: <Cb;Cx;CyM or <Cb;Cx;Cym
+            button_state = seq[length];
             seq[length] = '\0';
             break;
         }
@@ -254,7 +257,8 @@ RYCE_PRIVATE_DECL RYCE_InputError ryce_input_parse_sgr_mouse_internal(RYCE_Input
     };
 
     // Parse the SGR sequence: Cb;Cx;CyM or Cb;Cx;Cym.
-    if (sscanf(seq, "%d;%d;%d", &event.data.mouse.button, &event.data.mouse.x, &event.data.mouse.y) == 3) {
+    if (sscanf(seq, "%zu;%zu;%zu", &event.data.mouse.button, &event.data.mouse.x, &event.data.mouse.y) == 3) {
+        event.data.mouse.released = (bool)(button_state == 'm');
         return ryce_input_add_event_internal(ctx, event);
     }
 
