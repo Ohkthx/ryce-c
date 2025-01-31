@@ -17,10 +17,13 @@
 const size_t ALPHABET_SIZE = 26;
 const size_t SCREEN_WIDTH = 150; // 170
 const size_t SCREEN_HEIGHT = 40; // 54
-const double SCREEN_CHANGES = 0.01;
+const double SCREEN_CHANGES = 0.0005;
 const int TICKS_PER_SECOND = 144;
 const int TICK_INTERVAL = 1000000 / TICKS_PER_SECOND;
+
+// Tracks state of the drawing.
 bool draw = false;
+RYCE_Color_Code fg_color = RYCE_COLOR_DEFAULT;
 bool randomness = false;
 
 volatile sig_atomic_t lock = 0;
@@ -37,11 +40,11 @@ typedef struct AppState {
 
 void tick_action(AppState *app) {
     if (randomness) {
-        int changes = (int)app->tui->pane->length * SCREEN_CHANGES;
+        int changes = (int)app->tui->pane->capacity * SCREEN_CHANGES;
         for (int i = 0; i < changes; i++) {
             // Randomly change a character in the update buffer.
-            wchar_t c = (rand() % 2) == 0 ? RYCE_LITERAL('A') : RYCE_LITERAL('a') + (rand() % ALPHABET_SIZE);
-            app->tui->pane->update[rand() % app->tui->pane->length].ch = c;
+            wchar_t c = ((rand() % 2) == 0 ? RYCE_LITERAL('A') : RYCE_LITERAL('a')) + (rand() % ALPHABET_SIZE);
+            app->tui->pane->update[rand() % app->tui->pane->capacity].ch = c;
         }
     }
 
@@ -64,24 +67,40 @@ void input_action(AppState *app, size_t iter) {
         RYCE_InputEvent ev = buffer.events[i];
         if (ev.type == RYCE_EVENT_MOUSE) {
             // printf("Mouse event: %d %d %d\n\r", ev.data.mouse.button, ev.data.mouse.x, ev.data.mouse.y);
-            size_t idx = ryce_tui_coords_to_idx(ev.data.mouse.x - 1, ev.data.mouse.y - 1, app->tui->pane->width);
+            size_t idx = ryce_coords_to_idx(ev.data.mouse.x - 1, ev.data.mouse.y - 1, app->tui->pane->width);
             if (draw && app->tui->pane->width >= ev.data.mouse.x && app->tui->pane->height >= ev.data.mouse.y) {
                 app->tui->pane->update[idx].ch = RYCE_LITERAL('#');
+                app->tui->pane->update[idx].fg_color = fg_color;
             }
 
             continue;
         }
 
-        char key = ev.data.key;
-        // printf("Key event: %c\n\r", key);
-        if (key == 'q') {
+        switch (ev.data.key) {
+        case 'q':
             lock = 1;
             pthread_cancel(app->input.thread_id);
-            break;
-        } else if (key == 'a') {
+            return;
+        case 'd':
             draw = !draw;
-        } else if (key == 'c') {
+            break;
+        case 'c':
             ryce_clear_pane(app->tui->pane);
+            break;
+        case 't':
+            randomness = !randomness;
+            break;
+        case 'r':
+            fg_color = RYCE_COLOR_RED;
+            break;
+        case 'g':
+            fg_color = RYCE_COLOR_GREEN;
+            break;
+        case 'b':
+            fg_color = RYCE_COLOR_BLUE;
+            break;
+        default:
+            // printf("Key event: %c\n\r", ev.data.key);
         }
     }
 
