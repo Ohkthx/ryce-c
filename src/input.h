@@ -1,6 +1,7 @@
+#if defined(RYCE_IMPL) && !defined(RYCE_INPUT_IMPL)
+#define RYCE_INPUT_IMPL
+#endif
 #ifndef RYCE_INPUT_H
-#define RYCE_INPUT_H
-
 /*
     RyCE Input - A single-header, STB-styled input context.
 
@@ -16,6 +17,7 @@
 
     3) Compile and link all files together.
 */
+#define RYCE_INPUT_H
 
 #include <pthread.h> // pthread_t, pthread_mutex_t, pthread_create, pthread_join
 #include <signal.h>  // sig_atomic_t
@@ -24,17 +26,29 @@
 #include <termios.h> // termios, tcgetattr, tcsetattr, TCSAFLUSH
 #include <unistd.h>  // read, STDIN_FILENO
 
-// Visibility macros.
+// ---------------------------------------------------------------------//
+// BEGIN VISIBILITY MACROS
 #ifndef RYCE_PUBLIC_DECL
 #define RYCE_PUBLIC_DECL extern
-#endif
-#ifndef RYCE_PRIVATE_DECL
-#define RYCE_PRIVATE_DECL static
-#endif
+#endif // RYCE_PUBLIC
 
-#ifndef RYCE_INPUT_INITIAL_EVENTS
-#define RYCE_INPUT_INITIAL_EVENTS 16
-#endif // RYCE_INPUT_INITIAL_EVENTS
+#ifndef RYCE_PUBLIC
+#define RYCE_PUBLIC
+#endif // RYCE_PUBLIC
+
+#ifndef RYCE_PRIVATE
+#if defined(__GNUC__) || defined(__clang__)
+#define RYCE_PRIVATE __attribute__((unused)) static
+#else
+#define RYCE_PRIVATE static
+#endif
+#endif // RYCE_PRIVATE
+
+#ifndef RYCE_UNUSED
+#define RYCE_UNUSED(x) (void)(x)
+#endif // RYCE_UNUSED
+// END VISIBILITY MACROS
+// ---------------------------------------------------------------------//
 
 /*
     Mouse Modes:
@@ -52,6 +66,10 @@
 #ifndef RYCE_MOUSE_MODE
 #define RYCE_MOUSE_MODE RYCE_MOUSE_MODE_BASIC
 #endif // RYCE_MOUSE_MODE
+
+#ifndef RYCE_INPUT_INITIAL_EVENTS
+#define RYCE_INPUT_INITIAL_EVENTS 16
+#endif // RYCE_INPUT_INITIAL_EVENTS
 
 // Error Codes.
 typedef enum RYCE_InputError {
@@ -159,8 +177,6 @@ RYCE_PUBLIC_DECL RYCE_InputError ryce_input_listen(RYCE_InputContext *ctx);
  */
 RYCE_PUBLIC_DECL RYCE_InputError ryce_input_join(RYCE_InputContext *ctx);
 
-#endif // RYCE_INPUT_H
-
 /*===========================================================================
    ▗▄▄▄▖▗▖  ▗▖▗▄▄▖ ▗▖   ▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖ ▗▄▖ ▗▄▄▄▖▗▄▄▄▖ ▗▄▖ ▗▖  ▗▖
      █  ▐▛▚▞▜▌▐▌ ▐▌▐▌   ▐▌   ▐▛▚▞▜▌▐▌   ▐▛▚▖▐▌  █  ▐▌ ▐▌  █    █  ▐▌ ▐▌▐▛▚▖▐▌
@@ -171,7 +187,7 @@ RYCE_PUBLIC_DECL RYCE_InputError ryce_input_join(RYCE_InputContext *ctx);
   ===========================================================================*/
 #ifdef RYCE_INPUT_IMPL
 
-RYCE_PRIVATE_DECL RYCE_InputError ryce_input_add_event_internal(RYCE_InputContext *ctx, RYCE_InputEvent event) {
+RYCE_PRIVATE RYCE_InputError ryce_input_add_event_internal(RYCE_InputContext *ctx, RYCE_InputEvent event) {
     pthread_mutex_lock(&ctx->events_lock);
 
     if (ctx->ev_buffer->length >= ctx->ev_buffer->max_length) {
@@ -194,7 +210,7 @@ RYCE_PRIVATE_DECL RYCE_InputError ryce_input_add_event_internal(RYCE_InputContex
     return RYCE_INPUT_ERR_NONE;
 }
 
-RYCE_PRIVATE_DECL RYCE_InputError ryce_input_parse_basic_mouse_internal(RYCE_InputContext *ctx) {
+RYCE_PRIVATE RYCE_InputError ryce_input_parse_basic_mouse_internal(RYCE_InputContext *ctx) {
     const int ASCII_ENCODING_OFFSET = 32;
     unsigned char seq[] = {'\0', '\0', '\0'};
     size_t length = 0;
@@ -229,7 +245,7 @@ RYCE_PRIVATE_DECL RYCE_InputError ryce_input_parse_basic_mouse_internal(RYCE_Inp
     return RYCE_INPUT_ERR_NONE;
 }
 
-RYCE_PRIVATE_DECL RYCE_InputError ryce_input_parse_sgr_mouse_internal(RYCE_InputContext *ctx) {
+RYCE_PRIVATE RYCE_InputError ryce_input_parse_sgr_mouse_internal(RYCE_InputContext *ctx) {
     const size_t MAX_SGR_SEQ = 32;
     char seq[MAX_SGR_SEQ];
     size_t length = 0;
@@ -274,7 +290,7 @@ RYCE_PRIVATE_DECL RYCE_InputError ryce_input_parse_sgr_mouse_internal(RYCE_Input
     return RYCE_INPUT_ERR_NONE;
 }
 
-RYCE_PRIVATE_DECL RYCE_InputError ryce_input_parse_ansi_sequence_internal(RYCE_InputContext *ctx) {
+RYCE_PRIVATE RYCE_InputError ryce_input_parse_ansi_sequence_internal(RYCE_InputContext *ctx) {
     const size_t BRACKET_POS = 1;
     const size_t MODE_TYPE_POS = 2;
     unsigned char seq[] = {'\x1b', '\0', '\0'};
@@ -312,7 +328,7 @@ RYCE_PRIVATE_DECL RYCE_InputError ryce_input_parse_ansi_sequence_internal(RYCE_I
     return RYCE_INPUT_ERR_NONE;
 }
 
-RYCE_PRIVATE_DECL void *ryce_input_read_internal(void *arg) {
+RYCE_PRIVATE void *ryce_input_read_internal(void *arg) {
     RYCE_InputContext *ctx = (RYCE_InputContext *)arg;
     RYCE_InputError error = RYCE_INPUT_ERR_NONE;
     unsigned char user_input = '\0';
@@ -348,7 +364,7 @@ RYCE_PRIVATE_DECL void *ryce_input_read_internal(void *arg) {
     return nullptr;
 }
 
-RYCE_PUBLIC_DECL RYCE_InputError ryce_disable_raw_mode(struct termios *initial_termios) {
+RYCE_PUBLIC RYCE_InputError ryce_disable_raw_mode(struct termios *initial_termios) {
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, initial_termios) != 0) {
         return RYCE_INPUT_TCSETATTR_FAILED;
     }
@@ -356,7 +372,7 @@ RYCE_PUBLIC_DECL RYCE_InputError ryce_disable_raw_mode(struct termios *initial_t
     return RYCE_INPUT_ERR_NONE;
 }
 
-RYCE_PUBLIC_DECL RYCE_InputError ryce_enable_raw_mode(struct termios *initial_termios) {
+RYCE_PUBLIC RYCE_InputError ryce_enable_raw_mode(struct termios *initial_termios) {
     if (tcgetattr(STDIN_FILENO, initial_termios) != 0) {
         return RYCE_INPUT_TCGETATTR_FAILED;
     }
@@ -379,7 +395,7 @@ RYCE_PUBLIC_DECL RYCE_InputError ryce_enable_raw_mode(struct termios *initial_te
     return RYCE_INPUT_ERR_NONE;
 }
 
-RYCE_PUBLIC_DECL RYCE_InputError ryce_init_input_ctx(volatile sig_atomic_t *sigint, RYCE_InputContext *ctx) {
+RYCE_PUBLIC RYCE_InputError ryce_init_input_ctx(volatile sig_atomic_t *sigint, RYCE_InputContext *ctx) {
     *ctx = (RYCE_InputContext){
         .sigint = sigint,
     };
@@ -405,13 +421,13 @@ RYCE_PUBLIC_DECL RYCE_InputError ryce_init_input_ctx(volatile sig_atomic_t *sigi
     return RYCE_INPUT_ERR_NONE;
 }
 
-RYCE_PUBLIC_DECL void ryce_input_free_ctx(RYCE_InputContext *ctx) {
+RYCE_PUBLIC void ryce_input_free_ctx(RYCE_InputContext *ctx) {
     free(ctx->ev_buffer->events);
     free(ctx->ev_buffer);
     pthread_mutex_destroy(&ctx->events_lock);
 }
 
-RYCE_PUBLIC_DECL RYCE_InputEventBuffer ryce_input_get(RYCE_InputContext *ctx) {
+RYCE_PUBLIC RYCE_InputEventBuffer ryce_input_get(RYCE_InputContext *ctx) {
     RYCE_InputEventBuffer buffer = {nullptr, 0, RYCE_INPUT_INITIAL_EVENTS};
     if (ctx == nullptr) {
         return buffer;
@@ -442,7 +458,7 @@ RYCE_PUBLIC_DECL RYCE_InputEventBuffer ryce_input_get(RYCE_InputContext *ctx) {
     return buffer;
 }
 
-RYCE_PUBLIC_DECL RYCE_InputError ryce_input_listen(RYCE_InputContext *ctx) {
+RYCE_PUBLIC RYCE_InputError ryce_input_listen(RYCE_InputContext *ctx) {
     RYCE_InputError error = ryce_enable_raw_mode(&ctx->initial_termios);
     if (error != RYCE_INPUT_ERR_NONE) {
         return error;
@@ -461,7 +477,7 @@ RYCE_PUBLIC_DECL RYCE_InputError ryce_input_listen(RYCE_InputContext *ctx) {
  *
  * @param thread_id The thread ID of the input listening thread.
  */
-RYCE_PUBLIC_DECL RYCE_InputError ryce_input_join(RYCE_InputContext *ctx) {
+RYCE_PUBLIC RYCE_InputError ryce_input_join(RYCE_InputContext *ctx) {
     pthread_join(ctx->thread_id, nullptr);
 
     RYCE_InputError error = ryce_disable_raw_mode(&ctx->initial_termios);
@@ -473,3 +489,4 @@ RYCE_PUBLIC_DECL RYCE_InputError ryce_input_join(RYCE_InputContext *ctx) {
 }
 
 #endif // RYCE_INPUT_IMPL
+#endif // RYCE_INPUT_H

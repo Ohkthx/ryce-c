@@ -1,6 +1,7 @@
+#if defined(RYCE_IMPL) && !defined(RYCE_LOOP_IMPL)
+#define RYCE_LOOP_IMPL
+#endif
 #ifndef RYCE_LOOP_H
-#define RYCE_LOOP_H
-
 /*
     RyCE Loop - A single-header, STB-styled core loop context.
 
@@ -16,6 +17,7 @@
 
     3) Compile and link all files together.
 */
+#define RYCE_LOOP_H
 
 #include <errno.h>
 #include <signal.h>
@@ -23,10 +25,29 @@
 #include <stdlib.h>
 #include <time.h>
 
-// Visibility macros.
+// ---------------------------------------------------------------------//
+// BEGIN VISIBILITY MACROS
 #ifndef RYCE_PUBLIC_DECL
 #define RYCE_PUBLIC_DECL extern
+#endif // RYCE_PUBLIC
+
+#ifndef RYCE_PUBLIC
+#define RYCE_PUBLIC
+#endif // RYCE_PUBLIC
+
+#ifndef RYCE_PRIVATE
+#if defined(__GNUC__) || defined(__clang__)
+#define RYCE_PRIVATE __attribute__((unused)) static
+#else
+#define RYCE_PRIVATE static
 #endif
+#endif // RYCE_PRIVATE
+
+#ifndef RYCE_UNUSED
+#define RYCE_UNUSED(x) (void)(x)
+#endif // RYCE_UNUSED
+// END VISIBILITY MACROS
+// ---------------------------------------------------------------------//
 
 #define RYCE_TIME_NSEC 1'000'000'000L
 
@@ -73,8 +94,6 @@ RYCE_PUBLIC_DECL RYCE_LoopError ryce_init_loop_ctx(volatile sig_atomic_t *sigint
  */
 RYCE_PUBLIC_DECL RYCE_LoopError ryce_loop_tick(RYCE_LoopContext *ctx);
 
-#endif // RYCE_LOOP_H
-
 /*===========================================================================
    ▗▄▄▄▖▗▖  ▗▖▗▄▄▖ ▗▖   ▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖ ▗▄▖ ▗▄▄▄▖▗▄▄▄▖ ▗▄▖ ▗▖  ▗▖
      █  ▐▛▚▞▜▌▐▌ ▐▌▐▌   ▐▌   ▐▛▚▞▜▌▐▌   ▐▛▚▖▐▌  █  ▐▌ ▐▌  █    █  ▐▌ ▐▌▐▛▚▖▐▌
@@ -85,7 +104,7 @@ RYCE_PUBLIC_DECL RYCE_LoopError ryce_loop_tick(RYCE_LoopContext *ctx);
   ===========================================================================*/
 #ifdef RYCE_LOOP_IMPL
 
-RYCE_PUBLIC_DECL RYCE_LoopError ryce_init_loop_ctx(volatile sig_atomic_t *sigint, size_t tps, RYCE_LoopContext *ctx) {
+RYCE_PUBLIC RYCE_LoopError ryce_init_loop_ctx(volatile sig_atomic_t *sigint, size_t tps, RYCE_LoopContext *ctx) {
     tps = tps > 0 ? tps : 1; // Prevent DIV by 0.
     *ctx = (RYCE_LoopContext){
         .sigint = sigint,
@@ -102,7 +121,7 @@ RYCE_PUBLIC_DECL RYCE_LoopError ryce_init_loop_ctx(volatile sig_atomic_t *sigint
     return RYCE_LOOP_ERR_NONE;
 }
 
-RYCE_PUBLIC_DECL RYCE_LoopError ryce_loop_tick(RYCE_LoopContext *ctx) {
+RYCE_PUBLIC RYCE_LoopError ryce_loop_tick(RYCE_LoopContext *ctx) {
     if (ctx->sigint != nullptr && *(ctx->sigint) == 1) {
         return RYCE_LOOP_CAUGHT_SIGINT;
     }
@@ -148,3 +167,4 @@ RYCE_PUBLIC_DECL RYCE_LoopError ryce_loop_tick(RYCE_LoopContext *ctx) {
 }
 
 #endif // RYCE_LOOP_IMPL
+#endif // RYCE_LOOP_H

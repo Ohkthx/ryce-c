@@ -1,7 +1,7 @@
-#ifndef RYCE_TUI_H
-#define RYCE_TUI_H
+#if defined(RYCE_IMPL) && !defined(RYCE_TUI_IMPL)
 #define RYCE_TUI_IMPL
-
+#endif
+#ifndef RYCE_TUI_H
 /*
     RyCE TUI - A single-header, STB-styled terminal UI library.
 
@@ -29,14 +29,39 @@
         - ryce_free_pane
         - ryce_free_tui_ctx
         - ryce_render_tui
-        - ryce_coords_to_idx
         - ryce_clear_screen
         - ryce_clear_pane
 */
+#define RYCE_TUI_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+// ---------------------------------------------------------------------//
+// BEGIN VISIBILITY MACROS
+#ifndef RYCE_PUBLIC_DECL
+#define RYCE_PUBLIC_DECL extern
+#endif // RYCE_PUBLIC
+
+#ifndef RYCE_PUBLIC
+#define RYCE_PUBLIC
+#endif // RYCE_PUBLIC
+
+#ifndef RYCE_PRIVATE
+#if defined(__GNUC__) || defined(__clang__)
+#define RYCE_PRIVATE __attribute__((unused)) static
+#else
+#define RYCE_PRIVATE static
+#endif
+#endif // RYCE_PRIVATE
+
+#ifndef RYCE_UNUSED
+#define RYCE_UNUSED(x) (void)(x)
+#endif // RYCE_UNUSED
+// END VISIBILITY MACROS
+// ---------------------------------------------------------------------//
 
 /*
     Wide-char vs. standard char support.
@@ -94,14 +119,6 @@
 #define RYCE_ZERO 0
 #endif // RYCE_ZERO
 
-// Visibility macros.
-#ifndef RYCE_PUBLIC_DECL
-#define RYCE_PUBLIC_DECL extern
-#endif // RYCE_PUBLIC_DECL
-#ifndef RYCE_PRIVATE_DECL
-#define RYCE_PRIVATE_DECL static
-#endif // RYCE_PRIVATE_DECL
-
 // Numeric Contants
 enum {
     RYCE_WRITE_BUFFER_MULTIPLIER = 3, //< Multiplier for the write buffer.
@@ -146,26 +163,32 @@ typedef struct RYCE_Glyph {
 } RYCE_Glyph;
 
 typedef struct RYCE_SkipSequence {
-    int set;          ///< Flag to indicate if the buffer is set.
-    size_t start_idx; ///< Start index of the buffer.
-    size_t end_idx;   ///< End index of the buffer.
+    bool set;           ///< Flag to indicate if the buffer is set.
+    uint64_t start_idx; ///< Start index of the buffer.
+    uint64_t end_idx;   ///< End index of the buffer.
 } RYCE_SkipSequence;
 
 typedef struct RYCE_Pane {
-    size_t width;       ///< Pane width in characters.
-    size_t height;      ///< Pane height in characters.
-    size_t capacity;    ///< Capacity of the update and back buffers.
+    uint32_t width;     ///< Pane width in characters.
+    uint32_t height;    ///< Pane height in characters.
+    uint64_t capacity;  ///< Capacity of the update and back buffers.
     RYCE_Glyph *update; ///< Current modified buffer.
     RYCE_Glyph *cache;  ///< Last rendered buffer.
 } RYCE_Pane;
 
 typedef struct RYCE_TuiContext {
-    size_t cursor_x;                                   ///< Current cursor x position.
-    size_t cursor_y;                                   ///< Current cursor y position.
+    struct {
+        int64_t x; ///< X position.
+        int64_t y; ///< Y position.
+    } cursor;
+    struct {
+        RYCE_Color_Code active_fg; ///< Current foreground color.
+        RYCE_Color_Code active_bg; ///< Current background color.
+    } color;
     RYCE_CHAR ansi_buffer[RYCE_ANSI_CODE_BUFFER_SIZE]; ///< Buffer to store move sequences.
     RYCE_Pane *pane;                                   ///< Current pane.
-    size_t capacity;                                   ///< Maximum capacity of the write_buffer.
-    size_t write_length;                               ///< Current length of the write_buffer.
+    uint64_t capacity;                                 ///< Maximum capacity of the write_buffer.
+    uint64_t write_length;                             ///< Current length of the write_buffer.
     RYCE_CHAR *write_buffer;                           ///< Buffer that stores differences to be written.
 } RYCE_TuiContext;
 
@@ -185,7 +208,7 @@ RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_screen(void);
  * @param height Height of the pane.
  * @return Pane* Pointer to the initialized pane.
  */
-RYCE_PUBLIC_DECL RYCE_Pane *ryce_init_pane(size_t width, size_t height);
+RYCE_PUBLIC_DECL RYCE_Pane *ryce_init_pane(uint32_t width, uint32_t height);
 
 /**
  * @brief Initializes the Text UI Controller with a pane and a buffer to store changes.
@@ -194,7 +217,7 @@ RYCE_PUBLIC_DECL RYCE_Pane *ryce_init_pane(size_t width, size_t height);
  * @param height Height of the interface to be rendered.
  * @return RYCE_TuiContext* Pointer to the initialized controller.
  */
-RYCE_PUBLIC_DECL RYCE_TuiContext *ryce_init_tui_ctx(size_t width, size_t height);
+RYCE_PUBLIC_DECL RYCE_TuiContext *ryce_init_tui_ctx(uint32_t width, uint32_t height);
 
 /**
  * @brief Frees the memory allocated for a Pane.
@@ -214,24 +237,12 @@ RYCE_PUBLIC_DECL void ryce_free_tui_ctx(RYCE_TuiContext *tui);
 RYCE_PUBLIC_DECL RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui);
 
 /**
- * @brief Converts 2D coordinates to a 1D index in a flattened buffer.
- *
- * @param x X coordinate.
- * @param y Y coordinate.
- * @param width Width of the buffer.
- * @return size_t Index in the buffer.
- */
-RYCE_PUBLIC_DECL inline size_t ryce_ciords_to_idx(size_t x, size_t y, size_t width);
-
-/**
  * @brief Clears the update and cache buffers of a pane.
  *
  * @param pane Pane to clear.
  * @return RYCE_TuiError RYCE_TUI_ERR_NONE if successful, otherwise an error code.
  */
 RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_pane(RYCE_Pane *pane);
-
-#endif // RYCE_TUI_H
 
 /*===========================================================================
    ▗▄▄▄▖▗▖  ▗▖▗▄▄▖ ▗▖   ▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖ ▗▄▖ ▗▄▄▄▖▗▄▄▄▖ ▗▄▖ ▗▖  ▗▖
@@ -246,15 +257,17 @@ RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_pane(RYCE_Pane *pane);
 #include <math.h>   // log10
 #include <stdlib.h> // calloc, free
 
-RYCE_PRIVATE_DECL size_t ryce_count_digits_internal(const size_t num) {
+#ifdef RYCE_WIDE_CHAR_SUPPORT
+#include <locale.h> // setlocale, LC_ALL
+#endif
+
+RYCE_PRIVATE size_t ryce_count_digits_internal(const size_t num) {
     return num == 0 ? 1 : (size_t)log10((double)num) + 1;
 }
 
-RYCE_PRIVATE_DECL bool ryce_is_pane_init_internal(RYCE_Pane *pane) {
-    return (bool)(pane && pane->update && pane->cache);
-}
+RYCE_PRIVATE bool ryce_is_pane_init_internal(RYCE_Pane *pane) { return (bool)(pane && pane->update && pane->cache); }
 
-RYCE_PRIVATE_DECL void ryce_softreset_controller_internal(RYCE_TuiContext *tui) {
+RYCE_PRIVATE void ryce_softreset_controller_internal(RYCE_TuiContext *tui) {
     if (!tui) {
         return;
     }
@@ -266,15 +279,14 @@ RYCE_PRIVATE_DECL void ryce_softreset_controller_internal(RYCE_TuiContext *tui) 
     tui->ansi_buffer[0] = RYCE_ZERO;
 }
 
-RYCE_PRIVATE_DECL RYCE_TuiError ryce_write_color_internal(RYCE_TuiContext *tui, const size_t idx,
-                                                          RYCE_Color_Code fg_color, RYCE_Color_Code bg_color) {
+RYCE_PRIVATE RYCE_TuiError ryce_write_color_internal(RYCE_TuiContext *tui, const size_t idx) {
     if (!tui) {
         return RYCE_TUI_ERR_INVALID_TUI;
     }
 
     // Decide what changes need to be made.
-    int change_fg = tui->pane->update[idx].fg_color != fg_color;
-    int change_bg = tui->pane->update[idx].bg_color != bg_color;
+    int change_fg = tui->pane->update[idx].fg_color != tui->color.active_fg;
+    int change_bg = tui->pane->update[idx].bg_color != tui->color.active_bg;
     if (!change_fg && !change_bg) {
         return RYCE_TUI_ERR_NONE;
     }
@@ -283,10 +295,15 @@ RYCE_PRIVATE_DECL RYCE_TuiError ryce_write_color_internal(RYCE_TuiContext *tui, 
     if (change_fg && change_bg) {
         RYCE_SNPRINTF(tui->ansi_buffer, sizeof(tui->ansi_buffer) / sizeof(RYCE_CHAR), RYCE_COLOR_ANSI_TWO,
                       (RYCE_SIZE_T)tui->pane->update[idx].fg_color, (RYCE_SIZE_T)tui->pane->update[idx].bg_color);
+        tui->color.active_fg = tui->pane->update[idx].fg_color;
+        tui->color.active_bg = tui->pane->update[idx].bg_color;
     } else {
         RYCE_Color_Code color_change = tui->pane->update[idx].fg_color;
         if (change_bg) {
             color_change = tui->pane->update[idx].bg_color + RYCE_ANSI_BG_OFFSET;
+            tui->color.active_bg = color_change;
+        } else {
+            tui->color.active_fg = color_change;
         }
 
         // Write the color sequence to the buffer for either foreground or background.
@@ -305,7 +322,7 @@ RYCE_PRIVATE_DECL RYCE_TuiError ryce_write_color_internal(RYCE_TuiContext *tui, 
     return RYCE_TUI_ERR_NONE;
 }
 
-RYCE_PRIVATE_DECL RYCE_TuiError ryce_write_move_internal(RYCE_TuiContext *tui, const size_t x, const size_t y) {
+RYCE_PRIVATE RYCE_TuiError ryce_write_move_internal(RYCE_TuiContext *tui, const size_t x, const size_t y) {
     if (!tui) {
         return RYCE_TUI_ERR_INVALID_TUI;
     }
@@ -325,18 +342,18 @@ RYCE_PRIVATE_DECL RYCE_TuiError ryce_write_move_internal(RYCE_TuiContext *tui, c
     return RYCE_TUI_ERR_NONE;
 }
 
-RYCE_PRIVATE_DECL RYCE_TuiError ryce_inject_sequence_internal(RYCE_TuiContext *tui, const size_t x, const size_t y,
-                                                              RYCE_SkipSequence *skip) {
-    if (tui->cursor_y != y) {
+RYCE_PRIVATE RYCE_TuiError ryce_inject_sequence_internal(RYCE_TuiContext *tui, const uint32_t x, const uint32_t y,
+                                                         RYCE_SkipSequence *skip) {
+    if (tui->cursor.y != y) {
         // Move the cursor to the correct roki.
         RYCE_TuiError err_code = ryce_write_move_internal(tui, x, y);
         if (err_code != RYCE_TUI_ERR_NONE) {
             return err_code;
         }
 
-        skip->set = 0; // Reset the skip sequence.
+        skip->set = false; // Reset the skip sequence.
         return RYCE_TUI_ERR_NONE;
-    } else if (!skip->set || tui->cursor_x == x) {
+    } else if (!skip->set || tui->cursor.x == x) {
         return RYCE_TUI_ERR_NONE;
     }
 
@@ -363,11 +380,11 @@ RYCE_PRIVATE_DECL RYCE_TuiError ryce_inject_sequence_internal(RYCE_TuiContext *t
         }
     }
 
-    skip->set = 0; // Reset the skip sequence.
+    skip->set = false; // Reset the skip sequence.
     return RYCE_TUI_ERR_NONE;
 }
 
-RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_screen(void) {
+RYCE_PUBLIC RYCE_TuiError ryce_clear_screen(void) {
     RYCE_PRINTF(RYCE_CSI "2J" RYCE_CSI "0;0H");
     if (fflush(stdout) != 0) {
         return RYCE_TUI_ERR_STDOUT_FLUSH_FAILED;
@@ -376,12 +393,12 @@ RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_screen(void) {
     return RYCE_TUI_ERR_NONE;
 }
 
-RYCE_PUBLIC_DECL RYCE_Pane *ryce_init_pane(const size_t width, const size_t height) {
+RYCE_PUBLIC RYCE_Pane *ryce_init_pane(const uint32_t width, const uint32_t height) {
     if (width == 0 || height == 0) {
         return nullptr;
     }
 
-    size_t total_size = sizeof(RYCE_Pane) + ((width * height) * sizeof(RYCE_Glyph) * 2);
+    int64_t total_size = (int64_t)(sizeof(RYCE_Pane) + ((int64_t)(width * height) * sizeof(RYCE_Glyph) * 2));
     RYCE_Pane *pane = (RYCE_Pane *)calloc(1, total_size);
     if (!pane) {
         return nullptr;
@@ -389,7 +406,7 @@ RYCE_PUBLIC_DECL RYCE_Pane *ryce_init_pane(const size_t width, const size_t heig
 
     pane->width = width;
     pane->height = height;
-    pane->capacity = width * height;
+    pane->capacity = (int64_t)(width * height);
 
     pane->update = (RYCE_Glyph *)(pane + 1);
     pane->cache = pane->update + pane->capacity;
@@ -405,7 +422,7 @@ RYCE_PUBLIC_DECL RYCE_Pane *ryce_init_pane(const size_t width, const size_t heig
     return pane;
 }
 
-RYCE_PUBLIC_DECL RYCE_TuiContext *ryce_init_tui_ctx(const size_t width, const size_t height) {
+RYCE_PUBLIC RYCE_TuiContext *ryce_init_tui_ctx(const uint32_t width, const uint32_t height) {
     if (width == 0 || height == 0) {
         return nullptr;
     }
@@ -415,8 +432,10 @@ RYCE_PUBLIC_DECL RYCE_TuiContext *ryce_init_tui_ctx(const size_t width, const si
         return nullptr;
     }
 
-    tui->cursor_x = width;
-    tui->cursor_y = height;
+    tui->cursor.x = width;
+    tui->cursor.y = height;
+    tui->color.active_fg = RYCE_COLOR_DEFAULT;
+    tui->color.active_bg = RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET;
     tui->write_length = 0;
 
     // Create the default pane.
@@ -427,7 +446,7 @@ RYCE_PUBLIC_DECL RYCE_TuiContext *ryce_init_tui_ctx(const size_t width, const si
     }
 
     // Create the buffer to store differences to be written.
-    size_t default_length = (width * height) * RYCE_WRITE_BUFFER_MULTIPLIER;
+    int64_t default_length = (int64_t)(width * height) * RYCE_WRITE_BUFFER_MULTIPLIER;
     tui->capacity = default_length < RYCE_MIN_BUFFER_SIZE ? RYCE_MIN_BUFFER_SIZE : default_length;
     tui->write_buffer = (RYCE_CHAR *)calloc(tui->capacity, sizeof(RYCE_CHAR));
     if (!tui->write_buffer) {
@@ -436,10 +455,13 @@ RYCE_PUBLIC_DECL RYCE_TuiContext *ryce_init_tui_ctx(const size_t width, const si
         return nullptr;
     }
 
+#ifdef RYCE_WIDE_CHAR_SUPPORT
+    setlocale(LC_ALL, "");
+#endif
     return tui;
 }
 
-RYCE_PUBLIC_DECL void ryce_free_pane(RYCE_Pane *pane) {
+RYCE_PUBLIC void ryce_free_pane(RYCE_Pane *pane) {
     if (!pane) {
         return;
     }
@@ -447,7 +469,7 @@ RYCE_PUBLIC_DECL void ryce_free_pane(RYCE_Pane *pane) {
     free(pane);
 }
 
-RYCE_PUBLIC_DECL void ryce_free_tui_ctx(RYCE_TuiContext *tui) {
+RYCE_PUBLIC void ryce_free_tui_ctx(RYCE_TuiContext *tui) {
     if (!tui) {
         return;
     }
@@ -457,7 +479,7 @@ RYCE_PUBLIC_DECL void ryce_free_tui_ctx(RYCE_TuiContext *tui) {
     free(tui);
 }
 
-RYCE_PUBLIC_DECL RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui) {
+RYCE_PUBLIC RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui) {
     if (!tui) {
         return RYCE_TUI_ERR_INVALID_TUI;
     } else if (!ryce_is_pane_init_internal(tui->pane)) {
@@ -466,24 +488,22 @@ RYCE_PUBLIC_DECL RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui) {
 
     // Reset the write and move sequence buffers.
     ryce_softreset_controller_internal(tui);
-    RYCE_SkipSequence skip = {0, 0, 0};
-    size_t x = 1;
-    size_t y = 1;
-    RYCE_Color_Code active_fg = tui->pane[0].cache->fg_color; // Last drawn fg color stored here.
-    RYCE_Color_Code active_bg = tui->pane[0].cache->bg_color; // Last drawn bg color stored here.
+    RYCE_SkipSequence skip = {.set = false, .start_idx = 0, .end_idx = 0};
+    int64_t x = 1;
+    int64_t y = 1;
     RYCE_TuiError error = RYCE_TUI_ERR_NONE;
 
-    for (size_t i = 0; i < tui->pane->capacity; i++) {
+    for (uint32_t i = 0; i < tui->pane->capacity; i++) {
         const RYCE_Glyph *old_glyph = &tui->pane->cache[i];
         const RYCE_Glyph *new_glyph = &tui->pane->update[i];
 
-        if (new_glyph->ch == old_glyph->ch && new_glyph->fg_color == old_glyph->fg_color &&
-            new_glyph->bg_color == old_glyph->bg_color) {
+        if (new_glyph->ch == old_glyph->ch && new_glyph->fg_color == tui->color.active_fg &&
+            new_glyph->bg_color == tui->color.active_bg) {
             // No change, the character is skipable.
             if (!skip.set) {
                 skip.start_idx = i;
                 skip.end_idx = i + 1;
-                skip.set = 1;
+                skip.set = true;
             } else {
                 skip.end_idx++;
             }
@@ -494,20 +514,14 @@ RYCE_PUBLIC_DECL RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui) {
         x = i % tui->pane->width; // X position in flattened buffer.
         y = i / tui->pane->width; // Y position in flattened buffer.
 
-        // Inject the color code sequence if there is a change of color.
-        if (new_glyph->fg_color != active_fg || new_glyph->bg_color != active_bg) {
-            error = ryce_write_color_internal(tui, i, active_fg, active_bg);
-            if (error != RYCE_TUI_ERR_NONE) {
-                return error;
-            }
-
-            // Update the active terminal color.
-            active_fg = new_glyph->fg_color;
-            active_bg = new_glyph->bg_color;
-        }
-
         // Inject move sequences or reprinted characters.
         error = ryce_inject_sequence_internal(tui, x, y, &skip);
+        if (error != RYCE_TUI_ERR_NONE) {
+            return error;
+        }
+
+        // Inject the color code sequence if there is a change of color.
+        error = ryce_write_color_internal(tui, i);
         if (error != RYCE_TUI_ERR_NONE) {
             return error;
         }
@@ -521,20 +535,18 @@ RYCE_PUBLIC_DECL RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui) {
         // Update buffer being written, propagate the change to the back buffer.
         tui->write_buffer[tui->write_length++] = tui->pane->update[i].ch;
         tui->pane->cache[i] = tui->pane->update[i];
-        tui->cursor_x = x;
-        tui->cursor_y = y;
+        tui->cursor.x = x;
+        tui->cursor.y = y;
     }
 
-    // Null-terminate for printf and store the last colors into the first glyph.
+    // Null-terminate for printf.
     size_t index = tui->write_length < tui->capacity ? tui->write_length : tui->capacity - 1;
     tui->write_buffer[index] = RYCE_ZERO;
-    tui->pane->cache[0].fg_color = active_fg;
-    tui->pane->cache[0].bg_color = active_bg;
 
     // Render the differences and move the cursor to the bottom of the pane.
-    tui->cursor_x = tui->pane->width;
-    tui->cursor_y = tui->pane->height;
-    RYCE_PRINTF(RYCE_BUFFER_FMT, tui->write_buffer, (RYCE_SIZE_T)tui->cursor_y, (RYCE_SIZE_T)tui->cursor_x);
+    tui->cursor.x = tui->pane->width;
+    tui->cursor.y = tui->pane->height;
+    RYCE_PRINTF(RYCE_BUFFER_FMT, tui->write_buffer, (RYCE_SIZE_T)tui->cursor.y, (RYCE_SIZE_T)tui->cursor.x);
     if (fflush(stdout) != 0) {
         return RYCE_TUI_ERR_STDOUT_FLUSH_FAILED;
     }
@@ -542,11 +554,7 @@ RYCE_PUBLIC_DECL RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui) {
     return RYCE_TUI_ERR_NONE;
 }
 
-RYCE_PUBLIC_DECL inline size_t ryce_coords_to_idx(const size_t x, const size_t y, const size_t width) {
-    return (y * width) + x;
-}
-
-RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_pane(RYCE_Pane *pane) {
+RYCE_PUBLIC RYCE_TuiError ryce_clear_pane(RYCE_Pane *pane) {
     if (!pane) {
         return RYCE_TUI_ERR_INVALID_PANE;
     }
@@ -567,3 +575,4 @@ RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_pane(RYCE_Pane *pane) {
 }
 
 #endif // RYCE_TUI_IMPL
+#endif // RYCE_TUI_H
