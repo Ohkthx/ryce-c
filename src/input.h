@@ -58,13 +58,20 @@
     \x1b[?1006h - SGR Mouse Mode
 */
 
-#define RYCE_MOUSE_MODE_BASIC "\x1b[?1000h"
-#define RYCE_MOUSE_MODE_BUTTON "\x1b[?1002h"
-#define RYCE_MOUSE_MODE_ALL "\x1b[?1003h"
-#define RYCE_MOUSE_MODE_SGR "\x1b[?1006h"
-
 #ifndef RYCE_MOUSE_MODE
-#define RYCE_MOUSE_MODE RYCE_MOUSE_MODE_BASIC
+#ifdef RYCE_MOUSE_MODE_BUTTON
+#define RYCE_MOUSE_MODE "\x1b[?1002h"
+#define RYCE_MOUSE_MODE_UNSET "\x1b[?1002l"
+#elifdef RYCE_MOUSE_MODE_ALL
+#define RYCE_MOUSE_MODE "\x1b[?1003h"
+#define RYCE_MOUSE_MODE_UNSET "\x1b[?1003l"
+#elifdef RYCE_MOUSE_MODE_SGR
+#define RYCE_MOUSE_MODE "\x1b[?1006h"
+#define RYCE_MOUSE_MODE_UNSET "\x1b[?1006l"
+#else
+#define RYCE_MOUSE_MODE "\x1b[?1000h"
+#define RYCE_MOUSE_MODE_UNSET "\x1b[?1000l"
+#endif // RYCE_MOUSE_MODE
 #endif // RYCE_MOUSE_MODE
 
 #ifndef RYCE_INPUT_INITIAL_EVENTS
@@ -425,6 +432,9 @@ RYCE_PUBLIC void ryce_input_free_ctx(RYCE_InputContext *ctx) {
     free(ctx->ev_buffer->events);
     free(ctx->ev_buffer);
     pthread_mutex_destroy(&ctx->events_lock);
+#ifdef RYCE_MOUSE_MODE_UNSET
+    printf(RYCE_MOUSE_MODE_UNSET);
+#endif
 }
 
 RYCE_PUBLIC RYCE_InputEventBuffer ryce_input_get(RYCE_InputContext *ctx) {

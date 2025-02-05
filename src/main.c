@@ -3,7 +3,7 @@
 #define RYCE_IMPL
 
 // OVERRIDES / ENABLED FEATURES
-#define RYCE_MOUSE_MODE "\x1b[?1003h"
+#define RYCE_MOUSE_MODE_ALL
 #define RYCE_WIDE_CHAR_SUPPORT
 
 #include "input.h"
@@ -18,17 +18,16 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
 // --- Constants ----------------------------------------------------------
 const size_t ALPHABET_SIZE = 26;
-const size_t SCREEN_WIDTH = 270; // TUI width in characters
-const size_t SCREEN_HEIGHT = 64; // TUI height in characters
-const size_t MAP_LENGTH = 100;   // Map’s X dimension (will be bumped to odd)
-const size_t MAP_WIDTH = 50;     // Map’s Y dimension (will be bumped to odd)
-const size_t MAP_HEIGHT = 5;     // Single-layer (2D map in a 3D container)
+const size_t MAP_LENGTH = 100; // Map’s X dimension (will be bumped to odd)
+const size_t MAP_WIDTH = 50;   // Map’s Y dimension (will be bumped to odd)
+const size_t MAP_HEIGHT = 5;   // Single-layer (2D map in a 3D container)
 const double SCREEN_CHANGES = 0.0005;
 const int TICKS_PER_SECOND = 144;
 const int TICK_INTERVAL = 1000000 / TICKS_PER_SECOND;
@@ -36,7 +35,6 @@ const float64_t SCALE = 0.025;
 
 // --- Global state for exiting etc. ------------------------------------- //
 bool draw = false;
-RYCE_Color_Code fg_color = RYCE_COLOR_DEFAULT;
 bool player_moved = true;
 bool randomness = false;
 volatile sig_atomic_t lock = 0;
@@ -67,6 +65,20 @@ typedef struct AppState {
     RYCE_Vec3 player; // Player’s current position on the map
 } AppState;
 
+// --- Obtain terminal size ---------------------------------------------- //
+RYCE_Vec2 get_terminal_size(void) {
+    struct winsize ws;
+    RYCE_Vec2 size = {0, 0};
+
+    // Get the terminal size.
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1) {
+        size.x = ws.ws_col;
+        size.y = ws.ws_row;
+    }
+
+    return size;
+}
+
 // --- Helper: Returns a “chunk” from a noise value. --------------------- //
 // (Not used in the final TUI view code, but kept here for reference.)
 int get_chunk(float noise, int slices) {
@@ -75,6 +87,7 @@ int get_chunk(float noise, int slices) {
     if (bin >= slices) {
         bin = slices - 1;
     }
+
     return bin - (slices / 2);
 }
 
@@ -84,27 +97,27 @@ void init_entities(AppState *app) {
     app->entities = (Entity *)malloc(app->entity_count * sizeof(Entity));
     app->entities[0] = (Entity){.id = 0,
                                 .ch = RYCE_LITERAL(' '),
-                                .color = {.fg = RYCE_COLOR_DEFAULT, .bg = RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET},
-                                .solid = true};
+                                .color = {.fg = RYCE_COLOR_DEFAULT, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
+                                .solid = false};
     app->entities[1] = (Entity){.id = 1,
                                 .ch = RYCE_LITERAL('~'),
-                                .color = {.fg = RYCE_COLOR_BLUE, .bg = RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET},
+                                .color = {.fg = RYCE_COLOR_BLUE, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
                                 .solid = true};
     app->entities[2] = (Entity){.id = 2,
                                 .ch = RYCE_LITERAL('.'),
-                                .color = {.fg = RYCE_COLOR_YELLOW, .bg = RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET},
+                                .color = {.fg = RYCE_COLOR_YELLOW, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
                                 .solid = false};
     app->entities[3] = (Entity){.id = 3,
                                 .ch = RYCE_LITERAL(','),
-                                .color = {.fg = RYCE_COLOR_GREEN, .bg = RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET},
+                                .color = {.fg = RYCE_COLOR_GREEN, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
                                 .solid = false};
     app->entities[4] = (Entity){.id = 4,
                                 .ch = RYCE_LITERAL('T'),
-                                .color = {.fg = RYCE_COLOR_GREEN, .bg = RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET},
+                                .color = {.fg = RYCE_COLOR_GREEN, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
                                 .solid = true};
     app->entities[5] = (Entity){.id = 5,
                                 .ch = RYCE_LITERAL('▲'),
-                                .color = {.fg = RYCE_COLOR_WHITE, .bg = RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET},
+                                .color = {.fg = RYCE_COLOR_WHITE, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
                                 .solid = true};
 }
 
@@ -113,27 +126,30 @@ void init_entities(AppState *app) {
 void init_map(RYCE_3dTextMap *map) {
     const int64_t SEED = rand();
 
-    // Loop over the user-space coordinates.
+    // Iterate over the map’s X and Y dimensions.
     for (int y = map->y.min; y <= map->y.max; y++) {
         for (int x = map->x.min; x <= map->x.max; x++) {
-            // Since noise usually expects positive coordinates,
-            // you can “shift” x and y into a positive range for the noise function.
-            // For example, add the absolute minimum values.
             float64_t noise = ryce_simplex_noise2(SEED, (x - map->x.min) * SCALE, (y - map->y.min) * SCALE);
 
-            RYCE_Vec3 vec = {.x = x, .y = y, .z = 0};
+            RYCE_Vec3 vec = {
+                .x = x,
+                .y = y,
+                .z = get_chunk(noise, map->height),
+            };
+
             RYCE_EntityID entity = RYCE_ENTITY_NONE;
             if (noise <= -0.5) {
-                entity = 1;
+                entity = 1; // Water
             } else if (noise <= -0.3) {
-                entity = 2;
+                entity = 2; // Beach
             } else if (noise <= 0.0) {
-                entity = 3;
+                entity = 3; // Grass
             } else if (noise <= 0.5) {
-                entity = 4;
+                entity = 4; // Forest
             } else {
-                entity = 5;
+                entity = 5; // Mountain
             }
+
             ryce_map_add_entity(map, &vec, entity);
         }
     }
@@ -172,7 +188,12 @@ void input_action(AppState *app, size_t iter) {
     for (size_t i = 0; i < buffer.length; ++i) {
         RYCE_InputEvent ev = buffer.events[i];
         if (ev.type == RYCE_EVENT_MOUSE) {
-            // TODO: Add mouse movement.
+            if (draw) {
+                size_t idx =
+                    ryce_vec2_to_idx(&(RYCE_Vec2){.x = ev.data.mouse.x, .y = ev.data.mouse.y}, app->tui->pane->width);
+                app->tui->pane->update[idx].ch = RYCE_LITERAL('#');
+                app->tui->pane->update[idx].style.part.fg_color = RYCE_COLOR_WHITE;
+            }
             continue;
         }
 
@@ -217,15 +238,6 @@ void input_action(AppState *app, size_t iter) {
         case 't':
             randomness = !randomness;
             break;
-        case 'r':
-            fg_color = RYCE_COLOR_RED;
-            break;
-        case 'g':
-            fg_color = RYCE_COLOR_GREEN;
-            break;
-        case 'b':
-            fg_color = RYCE_COLOR_BLUE;
-            break;
         default:
             break;
         }
@@ -253,70 +265,86 @@ void tick_action(AppState *app) {
 
 // --- Render action ----------------------------------------------------- //
 // Draws the map onto the TUI pane.
+void render_map(AppState *app) {
+    int pane_width = app->tui->pane->width;
+    int pane_height = app->tui->pane->height;
+
+    for (int ty = 0; ty < pane_height; ty++) {
+        for (int tx = 0; tx < pane_width; tx++) {
+            // Calculate the map coordinate, the offset from the TUI’s center is added
+            // to the player’s map position.
+            int map_x = app->player.x + (tx - pane_width / 2);
+            int map_y = app->player.y + (ty - pane_height / 2);
+            size_t tui_idx = ryce_vec2_to_idx(&(RYCE_Vec2){.x = tx, .y = ty}, pane_width);
+
+            // Draw the default empty glpyh if outside the map bounds.
+            if (map_x < app->map.x.min || map_x > app->map.x.max || map_y < app->map.y.min || map_y > app->map.y.max) {
+                app->tui->pane->update[tui_idx] = RYCE_DEFAULT_GLYPH;
+                continue;
+            }
+
+            RYCE_Glyph glyph = RYCE_DEFAULT_GLYPH;
+            glyph.style.part.style_flags = RYCE_STYLE_MODIFIER_BOLD;
+            RYCE_Vec3 position = {.x = map_x, .y = map_y, .z = app->player.z};
+            RYCE_EntityID entity = RYCE_ENTITY_NONE;
+
+            // Search elevations below player's Z for map entities.
+            for (; position.z >= app->map.z.min; position.z--) {
+                entity = ryce_map_get_entity(&app->map, &position);
+                if (entity != RYCE_ENTITY_NONE) {
+                    if (position.z < app->player.z) {
+                        // Add styling to the lower elevations.
+                        glyph.style.part.style_flags = RYCE_STYLE_MODIFIER_DIM | RYCE_STYLE_MODIFIER_ITALIC;
+                    }
+                    break;
+                }
+            }
+
+            switch (entity) {
+            case 1: // Water
+                glyph.ch = RYCE_LITERAL('~');
+                glyph.style.part.fg_color = RYCE_COLOR_BLUE;
+                break;
+            case 2: // Beach
+                glyph.ch = RYCE_LITERAL('.');
+                glyph.style.part.fg_color = RYCE_COLOR_YELLOW;
+                break;
+            case 3: // Grass
+                glyph.ch = RYCE_LITERAL(',');
+                glyph.style.part.fg_color = RYCE_COLOR_GREEN;
+                break;
+            case 4: // Forest
+                glyph.ch = RYCE_LITERAL('T');
+                glyph.style.part.fg_color = RYCE_COLOR_GREEN;
+                break;
+            case 5: // Mountain
+                glyph.ch = RYCE_LITERAL('▲');
+                glyph.style.part.fg_color = RYCE_COLOR_WHITE;
+                break;
+            default:
+                break;
+            }
+
+            app->tui->pane->update[tui_idx] = glyph;
+        }
+    }
+}
+
 void render_action(AppState *app) {
     int pane_width = app->tui->pane->width;
     int pane_height = app->tui->pane->height;
 
     // For each cell in the TUI, determine which map coordinate to show.
     if (player_moved) {
-        for (int ty = 0; ty < pane_height; ty++) {
-            for (int tx = 0; tx < pane_width; tx++) {
-                // Calculate the map coordinate, the offset from the TUI’s center is added
-                // to the player’s map position.
-                int map_x = app->player.x + (tx - pane_width / 2);
-                int map_y = app->player.y + (ty - pane_height / 2);
-                RYCE_Vec3 map_vec = {.x = map_x, .y = map_y, .z = 0};
-                size_t tui_idx = ryce_vec2_to_idx(&(RYCE_Vec2){.x = tx, .y = ty}, pane_width);
-
-                // Only draw something if this coordinate is within the map.
-                if (map_x >= app->map.x.min && map_x <= app->map.x.max && map_y >= app->map.y.min &&
-                    map_y <= app->map.y.max) {
-                    RYCE_EntityID entity = ryce_map_get_entity(&app->map, &map_vec);
-
-                    RYCE_CHAR ch = RYCE_LITERAL(' ');
-                    switch (entity) {
-                    case 1: // Water
-                        ch = RYCE_LITERAL('~');
-                        fg_color = RYCE_COLOR_BLUE;
-                        break;
-                    case 2: // Beach
-                        ch = RYCE_LITERAL('.');
-                        fg_color = RYCE_COLOR_YELLOW;
-                        break;
-                    case 3: // Grass
-                        ch = RYCE_LITERAL(',');
-                        fg_color = RYCE_COLOR_GREEN;
-                        break;
-                    case 4: // Forest
-                        ch = RYCE_LITERAL('T');
-                        fg_color = RYCE_COLOR_GREEN;
-                        break;
-                    case 5: // Mountain
-                        ch = RYCE_LITERAL('▲');
-                        fg_color = RYCE_COLOR_WHITE;
-                        break;
-                    default:
-                        ch = RYCE_LITERAL(' ');
-                        break;
-                    }
-
-                    app->tui->pane->update[tui_idx].ch = ch;
-                    app->tui->pane->update[tui_idx].fg_color = fg_color;
-                } else {
-                    // Outside the map, draw emptiness.
-                    app->tui->pane->update[tui_idx].ch = RYCE_LITERAL(' ');
-                    app->tui->pane->update[tui_idx].fg_color = RYCE_COLOR_DEFAULT;
-                    app->tui->pane->update[tui_idx].bg_color = RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET;
-                }
-            }
-        }
+        render_map(app);
 
         // Draw the player at the center of the TUI.
         int center_x = pane_width / 2;
         int center_y = pane_height / 2;
         size_t player_idx = ryce_vec2_to_idx(&(RYCE_Vec2){.x = center_x, .y = center_y}, pane_width);
         app->tui->pane->update[player_idx].ch = '@';
-        app->tui->pane->update[player_idx].fg_color = RYCE_COLOR_RED;
+        app->tui->pane->update[player_idx].style.part.fg_color = RYCE_COLOR_RED;
+        app->tui->pane->update[player_idx].style.part.style_flags = RYCE_STYLE_MODIFIER_BOLD;
         player_moved = false;
     }
 
@@ -344,7 +372,8 @@ int main(void) {
     AppState app = {0};
 
     // Initialize the TUI.
-    app.tui = ryce_init_tui_ctx(SCREEN_WIDTH, SCREEN_HEIGHT);
+    RYCE_Vec2 term_size = get_terminal_size();
+    app.tui = ryce_init_tui_ctx(term_size.x, term_size.y);
     if (!app.tui) {
         fprintf(stderr, "Failed to init TUI.\n");
         return EXIT_FAILURE;

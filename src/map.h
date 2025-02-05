@@ -62,7 +62,7 @@ typedef enum RYCE_MapError {
 #ifndef RYCE_ENTITY
 #define RYCE_ENTITY
 typedef size_t RYCE_EntityID;
-#define RYCE_ENTITY_NONE 0;
+const RYCE_EntityID RYCE_ENTITY_NONE = 0;
 #endif // RYCE_ENTITY
 
 typedef struct RYCE_3dTextMap {

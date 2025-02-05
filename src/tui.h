@@ -108,8 +108,6 @@
 
 // ANSI escape sequences.
 #define RYCE_CSI RYCE_LITERAL("\x1b[")
-#define RYCE_COLOR_ANSI_ONE RYCE_CSI RYCE_NUM_FMT RYCE_LITERAL("m")
-#define RYCE_COLOR_ANSI_TWO RYCE_CSI RYCE_NUM_FMT RYCE_LITERAL(";") RYCE_NUM_FMT RYCE_LITERAL("m")
 #define RYCE_MOVE_ANSI RYCE_CSI RYCE_NUM_FMT RYCE_LITERAL(";") RYCE_NUM_FMT RYCE_LITERAL("H")
 #define RYCE_HIDE_CURSOR_ANSI RYCE_CSI RYCE_LITERAL("?25l")
 #define RYCE_UNHIDE_CURSOR_ANSI RYCE_CSI RYCE_LITERAL("?25h")
@@ -123,8 +121,7 @@
 enum {
     RYCE_WRITE_BUFFER_MULTIPLIER = 3, //< Multiplier for the write buffer.
     RYCE_ANSI_MOVE_COST = 7,          //< Cost of moving the cursor in ANSI escape sequences.
-    RYCE_ANSI_BG_OFFSET = 10,         //< Offset for background colors in ANSI escape sequences.
-    RYCE_ANSI_CODE_BUFFER_SIZE = 32,  //< Size of the ansi code buffer.
+    RYCE_ANSI_CODE_BUFFER_SIZE = 64,  //< Size of the ansi code buffer.
     RYCE_MIN_BUFFER_SIZE = 1024,      //< Minimum size of the write buffer.
 };
 
@@ -137,29 +134,52 @@ typedef enum RYCE_TuiError {
     RYCE_TUI_ERR_ANSI_BUFFER_OVERFLOW,  ///< Move buffer overflow.
     RYCE_TUI_ERR_WRITE_BUFFER_OVERFLOW, ///< Write buffer overflow.
     RYCE_TUI_ERR_STDOUT_FLUSH_FAILED,   ///< Failed to flush stdout.
+    RYCE_TUI_ERR_UNKNOWN_STYLE,         ///< Unknown style flag.
 } RYCE_TuiError;
 
 // ANSI Color Codes.
 typedef enum RYCE_Color_Code {
-    RYCE_COLOR_BLACK = 30,
-    RYCE_COLOR_RED = 31,
-    RYCE_COLOR_GREEN = 32,
-    RYCE_COLOR_YELLOW = 33,
-    RYCE_COLOR_BLUE = 34,
-    RYCE_COLOR_MAGENTA = 35,
-    RYCE_COLOR_CYAN = 36,
-    RYCE_COLOR_WHITE = 37,
-    RYCE_COLOR_DEFAULT = 39,
+    RYCE_COLOR_BG_OFFSET = 10, //< Offset for background colors.
+    RYCE_COLOR_BLACK = 30,     //< Black color.
+    RYCE_COLOR_RED = 31,       //< Red color.
+    RYCE_COLOR_GREEN = 32,     //< Green color.
+    RYCE_COLOR_YELLOW = 33,    //< Yellow color.
+    RYCE_COLOR_BLUE = 34,      //< Blue color.
+    RYCE_COLOR_MAGENTA = 35,   //< Magenta color.
+    RYCE_COLOR_CYAN = 36,      //< Cyan color.
+    RYCE_COLOR_WHITE = 37,     //< White color.
+    RYCE_COLOR_DEFAULT = 39,   //< Default color.
 } RYCE_Color_Code;
+
+// ANSI Style Codes.
+typedef enum RYCE_Style_Code {
+    RYCE_STYLE_MODIFIER_DEFAULT = 0,            //< Default style.
+    RYCE_STYLE_MODIFIER_BOLD = 1 << 0,          //< Bold style.
+    RYCE_STYLE_MODIFIER_DIM = 1 << 1,           //< Dim style.
+    RYCE_STYLE_MODIFIER_ITALIC = 1 << 3,        //< Italic style.
+    RYCE_STYLE_MODIFIER_UNDERLINE = 1 << 4,     //< Underline style.
+    RYCE_STYLE_MODIFIER_BLINK = 1 << 5,         //< Blink style.
+    RYCE_STYLE_MODIFIER_REVERSE = 1 << 7,       //< Reverse style.
+    RYCE_STYLE_MODIFIER_HIDDEN = 1 << 8,        //< Hidden style.
+    RYCE_STYLE_MODIFIER_STRIKETHROUGH = 1 << 9, //< Strikethrough style.
+} RYCE_Style_Code;
 
 /*
     Public API Structs
 */
 
+typedef union RYCE_Style {
+    struct {
+        uint8_t fg_color;     // Foreground color. [n & 0xFF]
+        uint8_t bg_color;     // Background color. [(n >> 8) & 0xFF]
+        uint16_t style_flags; // Style flags. [(n >> 16) & 0xFFFF]
+    } part;
+    uint32_t value;
+} RYCE_Style;
+
 typedef struct RYCE_Glyph {
-    RYCE_CHAR ch;             ///< Character to render.
-    RYCE_Color_Code fg_color; ///< Foreground color.
-    RYCE_Color_Code bg_color; ///< Background color.
+    RYCE_CHAR ch;     ///< Character to render.
+    RYCE_Style style; ///< Style of the character.
 } RYCE_Glyph;
 
 typedef struct RYCE_SkipSequence {
@@ -181,16 +201,48 @@ typedef struct RYCE_TuiContext {
         int64_t x; ///< X position.
         int64_t y; ///< Y position.
     } cursor;
-    struct {
-        RYCE_Color_Code active_fg; ///< Current foreground color.
-        RYCE_Color_Code active_bg; ///< Current background color.
-    } color;
+    RYCE_Style style;                                  ///< Current style.
     RYCE_CHAR ansi_buffer[RYCE_ANSI_CODE_BUFFER_SIZE]; ///< Buffer to store move sequences.
     RYCE_Pane *pane;                                   ///< Current pane.
     uint64_t capacity;                                 ///< Maximum capacity of the write_buffer.
     uint64_t write_length;                             ///< Current length of the write_buffer.
     RYCE_CHAR *write_buffer;                           ///< Buffer that stores differences to be written.
 } RYCE_TuiContext;
+
+/*
+    Public API Structs Constants
+*/
+
+/**
+ * @brief Default style with default colors and no styling.
+ */
+const RYCE_Style RYCE_DEFAULT_STYLE = {
+    .part =
+        {
+            .fg_color = RYCE_COLOR_DEFAULT,
+            .bg_color = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET,
+            .style_flags = RYCE_STYLE_MODIFIER_DEFAULT,
+        },
+};
+
+/**
+ * @brief Default glyph with empty value and styling.
+ */
+const RYCE_Glyph RYCE_DEFAULT_GLYPH = {
+    .ch = RYCE_EMPTY_CHAR,
+    .style = RYCE_DEFAULT_STYLE,
+};
+
+static const struct {
+    uint16_t bit; // Bitmask for the style flag.
+    int on_code;  // ANSI code to turn on the style.
+    int off_code; // ANSI code to turn off the style.
+} STYLE_MAP[] = {
+    {RYCE_STYLE_MODIFIER_BOLD, 1, 22},   {RYCE_STYLE_MODIFIER_DIM, 2, 22},
+    {RYCE_STYLE_MODIFIER_ITALIC, 3, 23}, {RYCE_STYLE_MODIFIER_UNDERLINE, 4, 24},
+    {RYCE_STYLE_MODIFIER_BLINK, 5, 25},  {RYCE_STYLE_MODIFIER_REVERSE, 7, 27},
+    {RYCE_STYLE_MODIFIER_HIDDEN, 8, 28}, {RYCE_STYLE_MODIFIER_STRIKETHROUGH, 9, 29},
+};
 
 /*
     Public API Functions.
@@ -257,17 +309,23 @@ RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_pane(RYCE_Pane *pane);
 #include <math.h>   // log10
 #include <stdlib.h> // calloc, free
 
+#ifndef RYCE_ARRAY_LEN
+#define RYCE_ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
+#endif // RYCE_ARRAY_LEN
+
 #ifdef RYCE_WIDE_CHAR_SUPPORT
 #include <locale.h> // setlocale, LC_ALL
 #endif
 
-RYCE_PRIVATE size_t ryce_count_digits_internal(const size_t num) {
+RYCE_PRIVATE inline size_t ryce_count_digits_internal(const size_t num) {
     return num == 0 ? 1 : (size_t)log10((double)num) + 1;
 }
 
-RYCE_PRIVATE bool ryce_is_pane_init_internal(RYCE_Pane *pane) { return (bool)(pane && pane->update && pane->cache); }
+RYCE_PRIVATE inline bool ryce_is_pane_init_internal(RYCE_Pane *pane) {
+    return (bool)(pane && pane->update && pane->cache);
+}
 
-RYCE_PRIVATE void ryce_softreset_controller_internal(RYCE_TuiContext *tui) {
+RYCE_PRIVATE inline void ryce_softreset_controller_internal(RYCE_TuiContext *tui) {
     if (!tui) {
         return;
     }
@@ -279,36 +337,66 @@ RYCE_PRIVATE void ryce_softreset_controller_internal(RYCE_TuiContext *tui) {
     tui->ansi_buffer[0] = RYCE_ZERO;
 }
 
-RYCE_PRIVATE RYCE_TuiError ryce_write_color_internal(RYCE_TuiContext *tui, const size_t idx) {
+RYCE_PRIVATE inline RYCE_TuiError ryce_write_style_internal(RYCE_TuiContext *tui, size_t idx) {
     if (!tui) {
         return RYCE_TUI_ERR_INVALID_TUI;
     }
 
-    // Decide what changes need to be made.
-    int change_fg = tui->pane->update[idx].fg_color != tui->color.active_fg;
-    int change_bg = tui->pane->update[idx].bg_color != tui->color.active_bg;
-    if (!change_fg && !change_bg) {
+    RYCE_Pane *pane = tui->pane;
+    RYCE_Style old_style = tui->style;
+    RYCE_Style new_style = pane->update[idx].style;
+    bool changed = false;
+
+    if (new_style.value == old_style.value) {
         return RYCE_TUI_ERR_NONE;
     }
 
-    // Write the color sequence to the buffer for both foreground and background.
-    if (change_fg && change_bg) {
-        RYCE_SNPRINTF(tui->ansi_buffer, sizeof(tui->ansi_buffer) / sizeof(RYCE_CHAR), RYCE_COLOR_ANSI_TWO,
-                      (RYCE_SIZE_T)tui->pane->update[idx].fg_color, (RYCE_SIZE_T)tui->pane->update[idx].bg_color);
-        tui->color.active_fg = tui->pane->update[idx].fg_color;
-        tui->color.active_bg = tui->pane->update[idx].bg_color;
-    } else {
-        RYCE_Color_Code color_change = tui->pane->update[idx].fg_color;
-        if (change_bg) {
-            color_change = tui->pane->update[idx].bg_color + RYCE_ANSI_BG_OFFSET;
-            tui->color.active_bg = color_change;
-        } else {
-            tui->color.active_fg = color_change;
-        }
+    // Prefix the ANSI buffer with the CSI sequence.
+    RYCE_SNPRINTF(tui->ansi_buffer, RYCE_ANSI_CODE_BUFFER_SIZE, RYCE_STR_FMT, RYCE_CSI);
 
-        // Write the color sequence to the buffer for either foreground or background.
-        RYCE_SNPRINTF(tui->ansi_buffer, sizeof(tui->ansi_buffer) / sizeof(RYCE_CHAR), RYCE_COLOR_ANSI_ONE,
-                      (RYCE_SIZE_T)color_change);
+    // Update the foreground color.
+    if (new_style.part.fg_color != old_style.part.fg_color) {
+        changed = true;
+        RYCE_SNPRINTF(tui->ansi_buffer + RYCE_STRLEN(tui->ansi_buffer),
+                      RYCE_ANSI_CODE_BUFFER_SIZE - RYCE_STRLEN(tui->ansi_buffer), RYCE_LITERAL("%d;"),
+                      new_style.part.fg_color);
+    }
+
+    // Update the background color.
+    if (new_style.part.bg_color != old_style.part.bg_color) {
+        changed = true;
+        RYCE_SNPRINTF(tui->ansi_buffer + RYCE_STRLEN(tui->ansi_buffer),
+                      RYCE_ANSI_CODE_BUFFER_SIZE - RYCE_STRLEN(tui->ansi_buffer), RYCE_LITERAL("%d;"),
+                      new_style.part.bg_color);
+    }
+
+    // Update the style flags.
+    uint16_t diff = new_style.part.style_flags ^ old_style.part.style_flags;
+    for (size_t i = 0; i < RYCE_ARRAY_LEN(STYLE_MAP); i++) {
+        if ((diff & STYLE_MAP[i].bit) != 0) {
+            // Determine if the style is on or off.
+            changed = true;
+            bool is_on = (bool)((new_style.part.style_flags & STYLE_MAP[i].bit) != 0);
+            int code = (int)is_on ? STYLE_MAP[i].on_code : STYLE_MAP[i].off_code;
+
+            // Append the ANSI code to the buffer.
+            RYCE_SNPRINTF(tui->ansi_buffer + RYCE_STRLEN(tui->ansi_buffer),
+                          sizeof(tui->ansi_buffer) - RYCE_STRLEN(tui->ansi_buffer), RYCE_LITERAL("%d;"), code);
+        }
+    }
+
+    if (!changed) {
+        // If nothing changed, just return.
+        return RYCE_TUI_ERR_NONE;
+    }
+
+    // Replace trailing ';' with 'm'
+    size_t len = RYCE_STRLEN(tui->ansi_buffer);
+    if (len > 0 && tui->ansi_buffer[len - 1] == RYCE_LITERAL(';')) {
+        tui->ansi_buffer[len - 1] = RYCE_LITERAL('m');
+    } else {
+        // In a weird corner case, if the buffer ended exactly, just append 'm'
+        RYCE_SNPRINTF(tui->ansi_buffer + len, RYCE_ANSI_CODE_BUFFER_SIZE - len, RYCE_LITERAL("m"));
     }
 
     size_t seq_len = RYCE_STRLEN(tui->ansi_buffer);
@@ -316,13 +404,13 @@ RYCE_PRIVATE RYCE_TuiError ryce_write_color_internal(RYCE_TuiContext *tui, const
         return RYCE_TUI_ERR_ANSI_BUFFER_OVERFLOW;
     }
 
-    // Append the color sequence to the write buffer.
+    // Add the ANSI sequence to the write buffer and update the styling.
     memcpy(tui->write_buffer + tui->write_length, tui->ansi_buffer, seq_len * sizeof(RYCE_CHAR));
     tui->write_length += seq_len;
     return RYCE_TUI_ERR_NONE;
 }
 
-RYCE_PRIVATE RYCE_TuiError ryce_write_move_internal(RYCE_TuiContext *tui, const size_t x, const size_t y) {
+RYCE_PRIVATE inline RYCE_TuiError ryce_write_move_internal(RYCE_TuiContext *tui, const size_t x, const size_t y) {
     if (!tui) {
         return RYCE_TUI_ERR_INVALID_TUI;
     }
@@ -342,8 +430,8 @@ RYCE_PRIVATE RYCE_TuiError ryce_write_move_internal(RYCE_TuiContext *tui, const 
     return RYCE_TUI_ERR_NONE;
 }
 
-RYCE_PRIVATE RYCE_TuiError ryce_inject_sequence_internal(RYCE_TuiContext *tui, const uint32_t x, const uint32_t y,
-                                                         RYCE_SkipSequence *skip) {
+RYCE_PRIVATE inline RYCE_TuiError ryce_inject_sequence_internal(RYCE_TuiContext *tui, const uint32_t x,
+                                                                const uint32_t y, RYCE_SkipSequence *skip) {
     if (tui->cursor.y != y) {
         // Move the cursor to the correct roki.
         RYCE_TuiError err_code = ryce_write_move_internal(tui, x, y);
@@ -384,15 +472,6 @@ RYCE_PRIVATE RYCE_TuiError ryce_inject_sequence_internal(RYCE_TuiContext *tui, c
     return RYCE_TUI_ERR_NONE;
 }
 
-RYCE_PUBLIC RYCE_TuiError ryce_clear_screen(void) {
-    RYCE_PRINTF(RYCE_CSI "2J" RYCE_CSI "0;0H");
-    if (fflush(stdout) != 0) {
-        return RYCE_TUI_ERR_STDOUT_FLUSH_FAILED;
-    }
-
-    return RYCE_TUI_ERR_NONE;
-}
-
 RYCE_PUBLIC RYCE_Pane *ryce_init_pane(const uint32_t width, const uint32_t height) {
     if (width == 0 || height == 0) {
         return nullptr;
@@ -411,12 +490,9 @@ RYCE_PUBLIC RYCE_Pane *ryce_init_pane(const uint32_t width, const uint32_t heigh
     pane->update = (RYCE_Glyph *)(pane + 1);
     pane->cache = pane->update + pane->capacity;
 
-    const RYCE_Glyph default_glyph = {
-        .ch = RYCE_EMPTY_CHAR, .fg_color = RYCE_COLOR_DEFAULT, .bg_color = RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET};
-
     for (size_t i = 0; i < pane->capacity; i++) {
-        pane->update[i] = default_glyph;
-        pane->cache[i] = default_glyph;
+        pane->update[i] = RYCE_DEFAULT_GLYPH;
+        pane->cache[i] = RYCE_DEFAULT_GLYPH;
     }
 
     return pane;
@@ -434,8 +510,7 @@ RYCE_PUBLIC RYCE_TuiContext *ryce_init_tui_ctx(const uint32_t width, const uint3
 
     tui->cursor.x = width;
     tui->cursor.y = height;
-    tui->color.active_fg = RYCE_COLOR_DEFAULT;
-    tui->color.active_bg = RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET;
+    tui->style = RYCE_DEFAULT_STYLE;
     tui->write_length = 0;
 
     // Create the default pane.
@@ -497,8 +572,8 @@ RYCE_PUBLIC RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui) {
         const RYCE_Glyph *old_glyph = &tui->pane->cache[i];
         const RYCE_Glyph *new_glyph = &tui->pane->update[i];
 
-        if (new_glyph->ch == old_glyph->ch && new_glyph->fg_color == tui->color.active_fg &&
-            new_glyph->bg_color == tui->color.active_bg) {
+        if (new_glyph->ch == old_glyph->ch && new_glyph->style.value == old_glyph->style.value &&
+            new_glyph->style.value == tui->style.value) {
             // No change, the character is skipable.
             if (!skip.set) {
                 skip.start_idx = i;
@@ -520,8 +595,8 @@ RYCE_PUBLIC RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui) {
             return error;
         }
 
-        // Inject the color code sequence if there is a change of color.
-        error = ryce_write_color_internal(tui, i);
+        // Inject the color code and style sequence if there is a change.
+        error = ryce_write_style_internal(tui, i);
         if (error != RYCE_TUI_ERR_NONE) {
             return error;
         }
@@ -535,6 +610,7 @@ RYCE_PUBLIC RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui) {
         // Update buffer being written, propagate the change to the back buffer.
         tui->write_buffer[tui->write_length++] = tui->pane->update[i].ch;
         tui->pane->cache[i] = tui->pane->update[i];
+        tui->style = tui->pane->update[i].style;
         tui->cursor.x = x;
         tui->cursor.y = y;
     }
@@ -560,15 +636,21 @@ RYCE_PUBLIC RYCE_TuiError ryce_clear_pane(RYCE_Pane *pane) {
     }
 
     for (size_t i = 0; i < pane->capacity; i++) {
-        if (pane->update[i].ch == RYCE_EMPTY_CHAR && pane->update[i].fg_color == RYCE_COLOR_DEFAULT &&
-            pane->update[i].bg_color == RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET) {
+        if (pane->update[i].ch == RYCE_EMPTY_CHAR && pane->update[i].style.value == RYCE_DEFAULT_STYLE.value) {
             continue;
         }
 
         // Non-default character, reset to default.
-        pane->update[i] = (RYCE_Glyph){.ch = RYCE_EMPTY_CHAR,
-                                       .fg_color = RYCE_COLOR_DEFAULT,
-                                       .bg_color = RYCE_COLOR_DEFAULT + RYCE_ANSI_BG_OFFSET};
+        pane->update[i] = RYCE_DEFAULT_GLYPH;
+    }
+
+    return RYCE_TUI_ERR_NONE;
+}
+
+RYCE_PUBLIC RYCE_TuiError ryce_clear_screen(void) {
+    RYCE_PRINTF(RYCE_CSI "2J" RYCE_CSI "0;0H");
+    if (fflush(stdout) != 0) {
+        return RYCE_TUI_ERR_STDOUT_FLUSH_FAILED;
     }
 
     return RYCE_TUI_ERR_NONE;
