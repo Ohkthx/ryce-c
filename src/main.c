@@ -44,14 +44,16 @@ void handle_sigint(int sig) {
 }
 
 // --- Entity ------------------------------------------------------------ //
+enum EntityAttributes {
+    ATTR_NONE = 0,
+    ATTR_SOLID = 1 << 0,
+    ATTR_WALKABLE = 1 << 1,
+};
+
 typedef struct Entity {
     RYCE_EntityID id;
-    RYCE_CHAR ch;
-    struct {
-        RYCE_Color_Code fg;
-        RYCE_Color_Code bg;
-    } color;
-    bool solid;
+    RYCE_Glyph *glyph;
+    uint8_t attr;
 } Entity;
 
 // --- Application state ------------------------------------------------- //
@@ -64,6 +66,24 @@ typedef struct AppState {
     size_t entity_count;
     RYCE_Vec3 player; // Player’s current position on the map
 } AppState;
+
+// --- Glyphs ------------------------------------------------------------- //
+RYCE_Glyph GLYPHS[] = {
+    {.ch = RYCE_LITERAL(' '), .style = RYCE_DEFAULT_STYLE},
+    {.ch = RYCE_LITERAL('~'),
+     .style = {.part = {.fg_color = RYCE_STYLE_COLOR_BLUE, .bg_color = RYCE_STYLE_COLOR_DEFAULT}}},
+    {.ch = RYCE_LITERAL('.'),
+     .style = {.part = {.fg_color = RYCE_STYLE_COLOR_YELLOW, .bg_color = RYCE_STYLE_COLOR_DEFAULT}}},
+    {.ch = RYCE_LITERAL(','),
+     .style = {.part = {.fg_color = RYCE_STYLE_COLOR_GREEN, .bg_color = RYCE_STYLE_COLOR_DEFAULT}}},
+    {.ch = RYCE_LITERAL('T'),
+     .style = {.part = {.fg_color = RYCE_STYLE_COLOR_GREEN, .bg_color = RYCE_STYLE_COLOR_DEFAULT}}},
+    {.ch = RYCE_LITERAL('▲'),
+     .style = {.part = {.fg_color = RYCE_STYLE_COLOR_WHITE, .bg_color = RYCE_STYLE_COLOR_DEFAULT}}},
+    {.ch = RYCE_LITERAL('@'),
+     .style = {.part = {.fg_color = RYCE_STYLE_COLOR_RED, .bg_color = RYCE_STYLE_COLOR_DEFAULT}}},
+
+};
 
 // --- Obtain terminal size ---------------------------------------------- //
 RYCE_Vec2 get_terminal_size(void) {
@@ -80,7 +100,6 @@ RYCE_Vec2 get_terminal_size(void) {
 }
 
 // --- Helper: Returns a “chunk” from a noise value. --------------------- //
-// (Not used in the final TUI view code, but kept here for reference.)
 int get_chunk(float noise, int slices) {
     float normalized = (noise + 1.0f) / 2.0f;
     int bin = (int)(normalized * slices);
@@ -95,30 +114,12 @@ int get_chunk(float noise, int slices) {
 void init_entities(AppState *app) {
     app->entity_count = 6;
     app->entities = (Entity *)malloc(app->entity_count * sizeof(Entity));
-    app->entities[0] = (Entity){.id = 0,
-                                .ch = RYCE_LITERAL(' '),
-                                .color = {.fg = RYCE_COLOR_DEFAULT, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
-                                .solid = false};
-    app->entities[1] = (Entity){.id = 1,
-                                .ch = RYCE_LITERAL('~'),
-                                .color = {.fg = RYCE_COLOR_BLUE, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
-                                .solid = true};
-    app->entities[2] = (Entity){.id = 2,
-                                .ch = RYCE_LITERAL('.'),
-                                .color = {.fg = RYCE_COLOR_YELLOW, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
-                                .solid = false};
-    app->entities[3] = (Entity){.id = 3,
-                                .ch = RYCE_LITERAL(','),
-                                .color = {.fg = RYCE_COLOR_GREEN, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
-                                .solid = false};
-    app->entities[4] = (Entity){.id = 4,
-                                .ch = RYCE_LITERAL('T'),
-                                .color = {.fg = RYCE_COLOR_GREEN, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
-                                .solid = true};
-    app->entities[5] = (Entity){.id = 5,
-                                .ch = RYCE_LITERAL('▲'),
-                                .color = {.fg = RYCE_COLOR_WHITE, .bg = RYCE_COLOR_DEFAULT + RYCE_COLOR_BG_OFFSET},
-                                .solid = true};
+    app->entities[0] = (Entity){.id = 0, .glyph = &GLYPHS[0], .attr = ATTR_NONE};
+    app->entities[1] = (Entity){.id = 1, .glyph = &GLYPHS[1], .attr = ATTR_NONE};
+    app->entities[2] = (Entity){.id = 2, .glyph = &GLYPHS[2], .attr = ATTR_WALKABLE};
+    app->entities[3] = (Entity){.id = 3, .glyph = &GLYPHS[3], .attr = ATTR_WALKABLE};
+    app->entities[4] = (Entity){.id = 4, .glyph = &GLYPHS[4], .attr = ATTR_SOLID};
+    app->entities[5] = (Entity){.id = 5, .glyph = &GLYPHS[5], .attr = ATTR_SOLID};
 }
 
 // --- Build the 3D map -------------------------------------------------- //
@@ -134,7 +135,7 @@ void init_map(RYCE_3dTextMap *map) {
             RYCE_Vec3 vec = {
                 .x = x,
                 .y = y,
-                .z = get_chunk(noise, map->height),
+                .z = 0 // get_chunk(noise, map->height),
             };
 
             RYCE_EntityID entity = RYCE_ENTITY_NONE;
@@ -163,7 +164,7 @@ RYCE_Vec3 spawn_player(AppState *app) {
             RYCE_Vec3 vec = {.x = x, .y = y, .z = 0};
             RYCE_EntityID entity = ryce_map_get_entity(&app->map, &vec);
             // If this cell is not solid, use it for the player spawn.
-            if (!app->entities[entity].solid) {
+            if (!(app->entities[entity].attr & ATTR_SOLID)) {
                 ryce_map_add_entity(&app->map, &vec, 0);
                 return vec;
             }
@@ -174,9 +175,17 @@ RYCE_Vec3 spawn_player(AppState *app) {
 }
 
 // --- Check movement ---------------------------------------------------- //
-bool can_move(AppState *app, RYCE_Vec3 *vec) {
-    RYCE_EntityID entity = ryce_map_get_entity(&app->map, vec);
-    return !app->entities[entity].solid;
+void move_player(AppState *app, RYCE_Vec3 *vec) {
+    RYCE_EntityID entity_id = ryce_map_get_entity(&app->map, vec);
+    if (entity_id == RYCE_ENTITY_NONE) {
+        return;
+    }
+
+    Entity entity = app->entities[entity_id];
+    if (entity.attr & ATTR_WALKABLE) {
+        app->player = *vec;
+        player_moved = true;
+    }
 }
 
 // --- Input processing -------------------------------------------------- //
@@ -192,7 +201,7 @@ void input_action(AppState *app, size_t iter) {
                 size_t idx =
                     ryce_vec2_to_idx(&(RYCE_Vec2){.x = ev.data.mouse.x, .y = ev.data.mouse.y}, app->tui->pane->width);
                 app->tui->pane->update[idx].ch = RYCE_LITERAL('#');
-                app->tui->pane->update[idx].style.part.fg_color = RYCE_COLOR_WHITE;
+                app->tui->pane->update[idx].style.part.fg_color = RYCE_STYLE_COLOR_WHITE;
             }
             continue;
         }
@@ -242,9 +251,8 @@ void input_action(AppState *app, size_t iter) {
             break;
         }
 
-        if (moved && can_move(app, &next_pos)) {
-            app->player = next_pos;
-            player_moved = true;
+        if (moved) {
+            move_player(app, &next_pos);
         }
     }
 
@@ -300,32 +308,7 @@ void render_map(AppState *app) {
                 }
             }
 
-            switch (entity) {
-            case 1: // Water
-                glyph.ch = RYCE_LITERAL('~');
-                glyph.style.part.fg_color = RYCE_COLOR_BLUE;
-                break;
-            case 2: // Beach
-                glyph.ch = RYCE_LITERAL('.');
-                glyph.style.part.fg_color = RYCE_COLOR_YELLOW;
-                break;
-            case 3: // Grass
-                glyph.ch = RYCE_LITERAL(',');
-                glyph.style.part.fg_color = RYCE_COLOR_GREEN;
-                break;
-            case 4: // Forest
-                glyph.ch = RYCE_LITERAL('T');
-                glyph.style.part.fg_color = RYCE_COLOR_GREEN;
-                break;
-            case 5: // Mountain
-                glyph.ch = RYCE_LITERAL('▲');
-                glyph.style.part.fg_color = RYCE_COLOR_WHITE;
-                break;
-            default:
-                break;
-            }
-
-            app->tui->pane->update[tui_idx] = glyph;
+            app->tui->pane->update[tui_idx] = *app->entities[entity].glyph;
         }
     }
 }
@@ -343,7 +326,7 @@ void render_action(AppState *app) {
         int center_y = pane_height / 2;
         size_t player_idx = ryce_vec2_to_idx(&(RYCE_Vec2){.x = center_x, .y = center_y}, pane_width);
         app->tui->pane->update[player_idx].ch = '@';
-        app->tui->pane->update[player_idx].style.part.fg_color = RYCE_COLOR_RED;
+        app->tui->pane->update[player_idx].style.part.fg_color = RYCE_STYLE_COLOR_RED;
         app->tui->pane->update[player_idx].style.part.style_flags = RYCE_STYLE_MODIFIER_BOLD;
         player_moved = false;
     }
