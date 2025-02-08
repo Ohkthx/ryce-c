@@ -28,6 +28,7 @@
         - ryce_free_pane
         - ryce_free_tui_ctx
         - ryce_render_tui
+        - ryce_move_cursor
         - ryce_clear_screen
         - ryce_clear_pane
 */
@@ -234,11 +235,6 @@ const RYCE_Glyph RYCE_DEFAULT_GLYPH = {
 */
 
 /**
- * @brief Performs a `clear` or `cls` using ANSI escape sequences.
- */
-RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_screen(void);
-
-/**
  * @brief Initializes a pane and fills its buffers with default values.
  *
  * @param width Width of the pane.
@@ -272,6 +268,19 @@ RYCE_PUBLIC_DECL void ryce_free_tui_ctx(RYCE_TuiContext *tui);
  * @return RYCE_TuiError RYCE_TUI_ERR_NONE if successful, otherwise an error code.
  */
 RYCE_PUBLIC_DECL RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui);
+
+/** * @brief Moves the cursor to a specific position using ANSI escape sequences.
+ *
+ * @param x X coordinate of the cursor.
+ * @param y Y coordinate of the cursor.
+ * @return RYCE_TuiError RYCE_TUI_ERR_NONE if successful, otherwise an error code.
+ */
+RYCE_PUBLIC_DECL RYCE_TuiError ryce_move_cursor(RYCE_TuiContext *tui, int64_t x, int64_t y);
+
+/**
+ * @brief Performs a `clear` or `cls` using ANSI escape sequences.
+ */
+RYCE_PUBLIC_DECL RYCE_TuiError ryce_clear_screen(void);
 
 /**
  * @brief Clears the update and cache buffers of a pane.
@@ -353,6 +362,24 @@ RYCE_PRIVATE inline void ryce_softreset_controller_internal(RYCE_TuiContext *tui
     // Null-terminate the buffers.
     tui->write_buffer[0] = RYCE_ZERO;
     tui->ansi_buffer[0] = RYCE_ZERO;
+}
+
+RYCE_PRIVATE inline RYCE_TuiError ryce_print_write_buffer_internal(RYCE_TuiContext *tui) {
+    // Null-terminate the write buffer.
+    size_t index = tui->write_length < tui->capacity ? tui->write_length : tui->capacity - 1;
+    tui->write_buffer[index] = RYCE_ZERO;
+
+    if (tui->cursor.x == tui->pane->width || tui->cursor.y == tui->pane->height) {
+        RYCE_PRINTF(RYCE_BUFFER_FMT, tui->write_buffer, (RYCE_SIZE_T)tui->cursor.y, (RYCE_SIZE_T)tui->cursor.x);
+    } else {
+        RYCE_PRINTF(RYCE_STR_FMT, tui->write_buffer);
+    }
+
+    if (fflush(stdout) != 0) {
+        return RYCE_TUI_ERR_STDOUT_FLUSH_FAILED;
+    }
+
+    return RYCE_TUI_ERR_NONE;
 }
 
 RYCE_PRIVATE inline RYCE_TuiError ryce_write_style_internal(RYCE_TuiContext *tui, size_t idx) {
@@ -551,6 +578,9 @@ RYCE_PUBLIC RYCE_TuiContext *ryce_init_tui_ctx(const uint32_t width, const uint3
 #ifdef RYCE_WIDE_CHAR_SUPPORT
     setlocale(LC_ALL, "");
 #endif
+#ifdef RYCE_HIDE_CURSOR
+    RYCE_PRINTF(RYCE_HIDE_CURSOR_ANSI);
+#endif
     return tui;
 }
 
@@ -633,19 +663,30 @@ RYCE_PUBLIC RYCE_TuiError ryce_render_tui(RYCE_TuiContext *tui) {
         tui->cursor.y = y;
     }
 
-    // Null-terminate for printf.
-    size_t index = tui->write_length < tui->capacity ? tui->write_length : tui->capacity - 1;
-    tui->write_buffer[index] = RYCE_ZERO;
-
     // Render the differences and move the cursor to the bottom of the pane.
     tui->cursor.x = tui->pane->width;
     tui->cursor.y = tui->pane->height;
-    RYCE_PRINTF(RYCE_BUFFER_FMT, tui->write_buffer, (RYCE_SIZE_T)tui->cursor.y, (RYCE_SIZE_T)tui->cursor.x);
-    if (fflush(stdout) != 0) {
-        return RYCE_TUI_ERR_STDOUT_FLUSH_FAILED;
+    return ryce_print_write_buffer_internal(tui);
+}
+
+RYCE_PUBLIC_DECL RYCE_TuiError ryce_move_cursor(RYCE_TuiContext *tui, int64_t x, int64_t y) {
+    if (!tui) {
+        return RYCE_TUI_ERR_INVALID_TUI;
     }
 
-    return RYCE_TUI_ERR_NONE;
+    if (x == tui->cursor.x && y == tui->cursor.y) {
+        return RYCE_TUI_ERR_NONE;
+    }
+
+    ryce_softreset_controller_internal(tui);
+    RYCE_TuiError err_code = ryce_write_move_internal(tui, x, y);
+    if (err_code != RYCE_TUI_ERR_NONE) {
+        return err_code;
+    }
+
+    tui->cursor.x = x;
+    tui->cursor.y = y;
+    return ryce_print_write_buffer_internal(tui);
 }
 
 RYCE_PUBLIC RYCE_TuiError ryce_clear_pane(RYCE_Pane *pane) {

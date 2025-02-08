@@ -55,16 +55,22 @@ typedef enum RYCE_VecError {
     Public API Structs
 */
 
+#ifndef RYCE_VEC2
+#define RYCE_VEC2
 typedef struct RYCE_Vec2 {
     int64_t x; // X-coordinate.
     int64_t y; // Y-coordinate.
 } RYCE_Vec2;
+#endif // RYCE_VEC2
 
+#ifndef RYCE_VEC3
+#define RYCE_VEC3
 typedef struct RYCE_Vec3 {
     int64_t x; // X-coordinate.
     int64_t y; // Y-coordinate.
     int64_t z; // Z-coordinate.
 } RYCE_Vec3;
+#endif // RYCE_VEC3
 
 /*
     Public API Functions

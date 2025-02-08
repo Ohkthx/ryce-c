@@ -70,8 +70,13 @@ typedef struct RYCE_LoopContext {
     volatile sig_atomic_t *sigint; //< Pointer to a flag to signal when to stop.
     struct timespec last;          //< Last recorded tick time.
     struct timespec interval;      //< Desired interval between ticks.
-    size_t tps;                    //< Ticks per second.
+    size_t target_tps;             //< Ticks per second.
     size_t tick;                   //< Current tick count.
+
+    // Fields for measuring actual TPS.
+    double tps;               //< Last computed ticks per second.
+    struct timespec last_tps; //< Time at which the current measurement window started.
+    size_t tick_count;        //< Ticks counted in the current measurement window.
 } RYCE_LoopContext;
 
 /*
@@ -109,14 +114,18 @@ RYCE_PUBLIC RYCE_LoopError ryce_init_loop_ctx(volatile sig_atomic_t *sigint, siz
     *ctx = (RYCE_LoopContext){
         .sigint = sigint,
         .interval = {.tv_sec = 0, .tv_nsec = RYCE_TIME_NSEC / tps},
-        .tps = tps,
+        .target_tps = tps,
         .tick = 0,
+        .tps = 0.0,
+        .tick_count = 0,
     };
 
     // Get the current time.
     if (clock_gettime(CLOCK_MONOTONIC, &ctx->last) != 0) {
         return RYCE_LOOP_INVALID_TIMING;
     }
+
+    ctx->last_tps = ctx->last;
 
     return RYCE_LOOP_ERR_NONE;
 }
@@ -131,7 +140,7 @@ RYCE_PUBLIC RYCE_LoopError ryce_loop_tick(RYCE_LoopContext *ctx) {
         return RYCE_LOOP_INVALID_TIMING;
     }
 
-    // Calculate next tick time: last + interval
+    // Calculate next tick time: last + interval.
     struct timespec next_tick = ctx->last;
     next_tick.tv_sec += ctx->interval.tv_sec;
     next_tick.tv_nsec += ctx->interval.tv_nsec;
@@ -156,12 +165,32 @@ RYCE_PUBLIC RYCE_LoopError ryce_loop_tick(RYCE_LoopContext *ctx) {
             req = rem; // Continue sleeping for the remaining time.
         }
     } else {
-        /// TODO: Handle being behind schedule.
+        // TODO: handle running behind schedule.
     }
 
-    // Increment tick count and update last tick time.
+    // Get the actual time after sleeping.
+    struct timespec actual;
+    if (clock_gettime(CLOCK_MONOTONIC, &actual) != 0) {
+        return RYCE_LOOP_INVALID_TIMING;
+    }
+
+    // Increment overall tick count.
     ctx->tick++;
-    ctx->last = next_tick;
+    ctx->tick_count++;
+
+    // Compute the elapsed time (in seconds) since the last TPS measurement window.
+    {
+        double elapsed = (actual.tv_sec - ctx->last_tps.tv_sec) + (actual.tv_nsec - ctx->last_tps.tv_nsec) / 1e9;
+        if (elapsed >= 1.0) {
+            // Calculate measured TPS as ticks divided by the actual elapsed time.
+            ctx->tps = (double)ctx->tick_count / elapsed;
+            ctx->tick_count = 0;
+            ctx->last_tps = actual;
+        }
+    }
+
+    // Update the last tick time.
+    ctx->last = actual;
 
     return RYCE_LOOP_ERR_NONE;
 }
