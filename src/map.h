@@ -19,8 +19,8 @@
 */
 #define RYCE_MAP_H
 
-#include "vec.h"
 #include <stddef.h>
+#include <stdint.h>
 
 // ---------------------------------------------------------------------//
 // BEGIN VISIBILITY MACROS
@@ -64,6 +64,15 @@ typedef enum RYCE_MapError {
 typedef size_t RYCE_EntityID;
 const RYCE_EntityID RYCE_ENTITY_NONE = 0;
 #endif // RYCE_ENTITY
+
+#ifndef RYCE_VEC3
+#define RYCE_VEC3
+typedef struct RYCE_Vec3 {
+    int64_t x; // X-coordinate.
+    int64_t y; // Y-coordinate.
+    int64_t z; // Z-coordinate.
+} RYCE_Vec3;
+#endif // RYCE_VEC3
 
 typedef struct RYCE_3dTextMap {
     struct {
@@ -154,8 +163,7 @@ RYCE_PRIVATE inline size_t ryce_translate_vec_internal(const RYCE_3dTextMap *map
     const int64_t internal_z = ryce_math_clamp(vec->z + z_offset, 0, (int64_t)map->height - 1);
 
     // Convert 3D indices to a 1D index.
-    RYCE_Vec3 internal_vec = {.x = internal_x, .y = internal_y, .z = internal_z};
-    return ryce_vec3_to_idx(&internal_vec, (int64_t)map->length, (int64_t)map->width);
+    return (internal_z * map->length * map->width) + (internal_y * map->length) + internal_x;
 }
 
 RYCE_PUBLIC RYCE_MapError ryce_init_3d_map(RYCE_3dTextMap *map, size_t length, size_t width, size_t height) {
@@ -214,7 +222,7 @@ RYCE_PUBLIC RYCE_MapError ryce_map_remove_entity(const RYCE_3dTextMap *map, cons
 
     // Translate the 3D coordinates to a 1D index.
     const size_t idx = ryce_translate_vec_internal(map, vec);
-    if (idx >= map->length * map->width * map->height || idx < 0) {
+    if (idx >= map->length * map->width * map->height) {
         return RYCE_MAP_INVALID_PLACEMENT;
     }
 
@@ -233,7 +241,7 @@ RYCE_PUBLIC RYCE_EntityID ryce_map_get_entity(const RYCE_3dTextMap *map, const R
 
     // Translate the 3D coordinates to a 1D index.
     const size_t idx = ryce_translate_vec_internal(map, vec);
-    if (idx >= map->length * map->width * map->height || idx < 0) {
+    if (idx >= map->length * map->width * map->height) {
         return RYCE_ENTITY_NONE;
     }
 

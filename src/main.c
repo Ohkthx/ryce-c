@@ -327,6 +327,9 @@ void render_map(AppState *app) {
             for (; position.z >= app->map.z.min; position.z--) {
                 entity = ryce_map_get_entity(&app->map, &position);
                 if (entity != RYCE_ENTITY_NONE) {
+                    glyph.ch = app->entities[entity].glyph->ch;
+                    glyph.style.part.fg_color = app->entities[entity].glyph->style.part.fg_color;
+                    glyph.style.part.bg_color = app->entities[entity].glyph->style.part.bg_color;
                     if (position.z < app->player.z) {
                         // Add styling to the lower elevations.
                         glyph.style.part.style_flags = RYCE_STYLE_MODIFIER_DIM | RYCE_STYLE_MODIFIER_ITALIC;
@@ -335,7 +338,7 @@ void render_map(AppState *app) {
                 }
             }
 
-            app->tui->pane->update[tui_idx] = *app->entities[entity].glyph;
+            app->tui->pane->update[tui_idx] = glyph;
         }
     }
 }
@@ -381,7 +384,7 @@ void render_action(AppState *app) {
 }
 
 int main(void) {
-    srand((unsigned)time(NULL));
+    srand((unsigned)time(nullptr));
     // Register SIGINT handler.
     struct sigaction sa;
     sa.sa_handler = handle_sigint;
