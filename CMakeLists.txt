@@ -9,7 +9,7 @@ if(MSVC)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W4 /Od")
 else()
     set(CMAKE_C_STANDARD 23)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O -Wall -Wextra -Werror -Wpedantic -Wundef -Wshadow -fsanitize=address -fsanitize=undefined -pthread -g")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -Wall -Wextra -Werror -Wpedantic -Wundef -Wshadow -fsanitize=address -fsanitize=undefined -pthread -g")
 endif()
 
 set(CMAKE_C_STANDARD_REQUIRED ON)
