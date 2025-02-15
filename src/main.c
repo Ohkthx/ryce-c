@@ -9,6 +9,7 @@
 
 #include "bla.h"
 #include "camera.h"
+#include "fov.h"
 #include "input.h"
 #include "loop.h"
 #include "map.h"
@@ -16,7 +17,6 @@
 #include "tui.h"
 #include "vec.h"
 #include <float.h>
-#include <inttypes.h> // NOTE: For PRId64
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
@@ -28,10 +28,11 @@
 #include <unistd.h>
 
 // --- Constants --------------------------------------------------------- //
+#define MAP_MAX_X 501 // Map length (X-axis)
+#define MAP_MAX_Y 501 // Map width (Y-axis)
+#define MAP_MAX_Z 5
+
 const size_t ALPHABET_SIZE = 26;
-const size_t MAP_LENGTH = 500; // Map’s X dimension (will be bumped to odd)
-const size_t MAP_WIDTH = 500;  // Map’s Y dimension (will be bumped to odd)
-const size_t MAP_HEIGHT = 5;   // Single-layer (2D map in a 3D container)
 const double SCREEN_CHANGES = 0.0005;
 const int TICKS_PER_SECOND = 512;
 const int DIST_PER_SECOND = 20; // Amount of blocks that can be traveled per second.
@@ -63,17 +64,25 @@ typedef struct AppState {
     RYCE_CameraContext camera;
     RYCE_InputContext input;
     RYCE_TuiContext tui;
+    RYCE_LoopContext loop;
     struct {
         RYCE_Pane map;
         RYCE_Pane debug;
     } panes;
-    RYCE_LoopContext loop;
-    RYCE_3dTextMap map;
+    struct {
+        RYCE_3dTextMap entity;
+        uint8_t visiblity[MAP_MAX_X * MAP_MAX_Y];
+        uint8_t path[MAP_MAX_X * MAP_MAX_Y];
+    } maps;
     Entity *entities;
     size_t entity_count;
-    RYCE_Vec3 player;      // Player’s current position on the map
-    RYCE_Vec2 player_dest; // Player’s destination (for movement)
-    RYCE_BLA_Error move_error;
+    struct {
+        RYCE_Vec3 pos;
+        RYCE_Vec2 dest;
+        RYCE_Vec2 view;
+        RYCE_BLA_Error move_error;
+        uint32_t last_move;
+    } player;
 } AppState;
 
 // --- Glyphs ------------------------------------------------------------ //
@@ -130,8 +139,9 @@ void init_entities(AppState *app) {
     app->entities[5] = (Entity){.id = 5, .glyph = &GLYPHS[5], .attr = ATTR_SOLID};
 }
 
-void init_map(RYCE_3dTextMap *map) {
+void init_map(AppState *app) {
     const int64_t SEED = rand();
+    RYCE_3dTextMap *map = &app->maps.entity;
 
     // Iterate over the map’s X and Y dimensions.
     for (int y = map->y.min; y <= map->y.max; y++) {
@@ -146,7 +156,7 @@ void init_map(RYCE_3dTextMap *map) {
 
             // Label the entity.
             RYCE_EntityID entity = RYCE_ENTITY_NONE;
-            if (noise <= -0.5) {
+            if (noise <= -0.65) {
                 entity = 1; // Water
             } else if (noise <= -0.3) {
                 entity = 2; // Beach
@@ -158,23 +168,34 @@ void init_map(RYCE_3dTextMap *map) {
                 entity = 5; // Mountain
             }
 
+            int32_t tx = x + -map->x.min;
+            int32_t ty = y + -map->y.min;
+            if (app->entities[entity].attr & ATTR_SOLID) {
+                app->maps.path[tx + (ty * app->maps.entity.length)] = 0;
+            } else {
+                app->maps.path[tx + (ty * app->maps.entity.length)] = 1;
+            }
+
             ryce_map_add_entity(map, &vec, entity);
         }
     }
 }
+
 RYCE_Vec3 init_player(AppState *app) {
     // Iterate from the origin (0,0,0) up to the top-right corner.
-    for (int y = 0; y <= app->map.y.max; y++) {
-        for (int x = 0; x <= app->map.x.max; x++) {
+    for (int y = 0; y <= app->maps.entity.y.max; y++) {
+        for (int x = 0; x <= app->maps.entity.x.max; x++) {
             RYCE_Vec3 vec = {.x = x, .y = y, .z = 0};
-            RYCE_EntityID entity = ryce_map_get_entity(&app->map, &vec);
+            RYCE_EntityID entity = ryce_map_get_entity(&app->maps.entity, &vec);
             if (app->entities[entity].attr & ATTR_WALKABLE) {
+                app->maps.visiblity[vec.x + (vec.y * app->maps.entity.x.max)] = 3;
                 return vec;
             }
         }
     }
 
     // Fallback: if no valid location was found, return the origin.
+    app->maps.visiblity[0] = 3;
     return (RYCE_Vec3){0, 0, 0};
 }
 
@@ -205,15 +226,15 @@ int get_elevation(float noise, int slices) {
 
 // --- Movement & Camera ------------------------------------------------- //
 void reset_movement(AppState *app) {
-    app->player_dest = (RYCE_Vec2){.x = app->player.x, .y = app->player.y};
-    app->move_error.initialized = 0;
+    app->player.dest = (RYCE_Vec2){.x = app->player.pos.x, .y = app->player.pos.y};
+    app->player.move_error.initialized = 0;
 }
 
 void move_player(AppState *app) {
     static double move_accumulator = 0.0;
     move_accumulator += (double)DIST_PER_SECOND / TICKS_PER_SECOND;
 
-    if (app->player.x == app->player_dest.x && app->player.y == app->player_dest.y) {
+    if (app->player.pos.x == app->player.dest.x && app->player.pos.y == app->player.dest.y) {
         // No movement required.
         move_accumulator = 0.0; // Reset the accumulator.
         reset_movement(app);
@@ -221,8 +242,8 @@ void move_player(AppState *app) {
     }
 
     // Prevent out-of-bounds movement.
-    app->player_dest.x = ryce_math_clamp(app->player_dest.x, app->map.x.min, app->map.x.max);
-    app->player_dest.y = ryce_math_clamp(app->player_dest.y, app->map.y.min, app->map.y.max);
+    app->player.dest.x = ryce_math_clamp(app->player.dest.x, app->maps.entity.x.min, app->maps.entity.x.max);
+    app->player.dest.y = ryce_math_clamp(app->player.dest.y, app->maps.entity.y.min, app->maps.entity.y.max);
 
     if (move_accumulator < 1.0) {
         // Accumulator not large enough for a full step.
@@ -230,22 +251,23 @@ void move_player(AppState *app) {
     }
 
     // Compute the next step toward the destination.
-    RYCE_Vec2 player = {app->player.x, app->player.y};
-    RYCE_Vec2 next = ryce_bla_2dline(&player, &app->player_dest, &app->move_error);
+    RYCE_Vec2 player = {app->player.pos.x, app->player.pos.y};
+    RYCE_Vec2 next = ryce_bla_2dline(&player, &app->player.dest, &app->player.move_error);
 
     // If the computed step is the same as the current position, the path is blocked.
-    if (app->player.x == next.x && app->player.y == next.y) {
+    if (app->player.pos.x == next.x && app->player.pos.y == next.y) {
         move_accumulator = 0.0; // Reset the accumulator.
         reset_movement(app);
         return;
     }
 
     // Check if the next cell is walkable.
-    RYCE_Vec3 dest = {next.x, next.y, app->player.z};
-    RYCE_EntityID entity_id = ryce_map_get_entity(&app->map, &dest);
+    RYCE_Vec3 dest = {next.x, next.y, app->player.pos.z};
+    RYCE_EntityID entity_id = ryce_map_get_entity(&app->maps.entity, &dest);
     if (entity_id != RYCE_ENTITY_NONE && (app->entities[entity_id].attr & ATTR_WALKABLE)) {
-        app->player = dest;
+        app->player.pos = dest;
         move_accumulator -= 1.0;
+        app->player.last_move = app->loop.tick;
     } else {
         // If blocked, cancel movement.
         move_accumulator = 0.0; // Reset the accumulator.
@@ -263,10 +285,15 @@ void input_action(AppState *app) {
     for (size_t i = 0; i < buffer.length; ++i) {
         RYCE_InputEvent ev = buffer.events[i];
 
-        if (ev.type == RYCE_EVENT_MOUSE && ev.data.mouse.button == 3) {
+        if (ev.type == RYCE_EVENT_MOUSE) {
             RYCE_Vec2 mouse_pos = {.x = ev.data.mouse.x - 1, .y = ev.data.mouse.y - 1};
-            RYCE_Vec2 map_pos = ryce_from_terminal(&app->camera, &mouse_pos);
-            app->player_dest = (RYCE_Vec2){.x = map_pos.x, .y = map_pos.y};
+            RYCE_Vec2 map_pos = ryce_get_center_offset(&app->camera, &mouse_pos);
+            if (ev.data.mouse.button == 3) {
+                app->player.view = (RYCE_Vec2){.x = map_pos.x, .y = map_pos.y};
+                app->player.dest = (RYCE_Vec2){.x = map_pos.x, .y = map_pos.y};
+            } else {
+                app->player.view = (RYCE_Vec2){.x = map_pos.x, .y = map_pos.y};
+            }
         } else {
             switch (ev.data.key) {
             case 'x':
@@ -274,16 +301,16 @@ void input_action(AppState *app) {
                 pthread_cancel(app->input.thread_id);
                 return;
             case 'w': // Move up (decrease y)
-                app->player_dest.y = app->player_dest.y - 1;
+                app->player.dest.y = app->player.dest.y - 1;
                 break;
             case 's': // Move down (increase y)
-                app->player_dest.y = app->player_dest.y + 1;
+                app->player.dest.y = app->player.dest.y + 1;
                 break;
             case 'a': // Move left (decrease x)
-                app->player_dest.x = app->player_dest.x - 1;
+                app->player.dest.x = app->player.dest.x - 1;
                 break;
             case 'd': // Move right (increase x)
-                app->player_dest.x = app->player_dest.x + 1;
+                app->player.dest.x = app->player.dest.x + 1;
                 break;
             case 'c':
                 ryce_clear_pane(&app->panes.map);
@@ -298,7 +325,17 @@ void input_action(AppState *app) {
 }
 
 // --- Tick Actions ------------------------------------------------------ //
-void tick_action(AppState *app) { move_player(app); }
+void tick_action(AppState *app) {
+    move_player(app);
+
+    for (uint32_t i = 0; i < MAP_MAX_X * MAP_MAX_Y; i++) {
+        app->maps.visiblity[i] &= ~RYCE_FOV_VISIBLE;
+    }
+
+    uint32_t cx = app->player.pos.x + app->maps.entity.x.max;
+    uint32_t cy = app->player.pos.y + app->maps.entity.y.max;
+    ryce_fov(cx, cy, 20, app->maps.path, app->maps.visiblity, app->maps.entity.length, app->maps.entity.width);
+}
 
 // --- Render Actions ---------------------------------------------------- //
 // Draws the map onto the TUI pane.
@@ -311,33 +348,50 @@ void render_map(AppState *app) {
             // Calculate the map coordinate, the offset from the TUI’s center is added
             // to the player’s map position.
             RYCE_Vec2 term_pos = {tx, ty};
-            RYCE_Vec2 map_pos = ryce_from_terminal(&app->camera, &term_pos);
+            RYCE_Vec2 map_pos = ryce_get_center_offset(&app->camera, &term_pos);
             int map_x = map_pos.x;
             int map_y = map_pos.y;
 
             // Draw the default empty glpyh if outside the map bounds.
-            if (map_x < app->map.x.min || map_x > app->map.x.max || map_y < app->map.y.min || map_y > app->map.y.max) {
+            if (map_x < app->maps.entity.x.min || map_x > app->maps.entity.x.max || map_y < app->maps.entity.y.min ||
+                map_y > app->maps.entity.y.max) {
                 ryce_pane_set(&app->panes.map, tx, ty, &RYCE_DEFAULT_GLYPH);
                 continue;
             }
 
             RYCE_Glyph glyph = RYCE_DEFAULT_GLYPH;
             glyph.style.part.style_flags = RYCE_STYLE_MODIFIER_BOLD;
-            RYCE_Vec3 position = {.x = map_x, .y = map_y, .z = app->player.z};
+            RYCE_Vec3 position = {.x = map_x, .y = map_y, .z = app->player.pos.z};
             RYCE_EntityID entity = RYCE_ENTITY_NONE;
 
             // Search elevations below player's Z for map entities.
-            for (; position.z >= app->map.z.min; position.z--) {
-                entity = ryce_map_get_entity(&app->map, &position);
-                if (entity != RYCE_ENTITY_NONE) {
-                    glyph.ch = app->entities[entity].glyph->ch;
-                    glyph.style.part.fg_color = app->entities[entity].glyph->style.part.fg_color;
-                    glyph.style.part.bg_color = app->entities[entity].glyph->style.part.bg_color;
-                    if (position.z < app->player.z) {
-                        // Add styling to the lower elevations.
-                        glyph.style.part.style_flags = RYCE_STYLE_MODIFIER_DIM | RYCE_STYLE_MODIFIER_ITALIC;
-                    }
-                    break;
+            for (; position.z >= app->maps.entity.z.min; position.z--) {
+                entity = ryce_map_get_entity(&app->maps.entity, &position);
+                if (entity == RYCE_ENTITY_NONE) {
+                    continue;
+                }
+
+                glyph.ch = app->entities[entity].glyph->ch;
+                glyph.style.part.fg_color = app->entities[entity].glyph->style.part.fg_color;
+                glyph.style.part.bg_color = app->entities[entity].glyph->style.part.bg_color;
+                if (position.z < app->player.pos.z) {
+                    // Add styling to the lower elevations.
+                    glyph.style.part.style_flags = RYCE_STYLE_MODIFIER_DIM | RYCE_STYLE_MODIFIER_ITALIC;
+                }
+
+                // Visibility check.
+                uint32_t vx = map_x + app->maps.entity.x.max;
+                uint32_t vy = map_y + app->maps.entity.y.max;
+                uint32_t idx = vx + (vy * app->maps.entity.length);
+                uint8_t flags = app->maps.visiblity[idx];
+                if (flags == RYCE_FOV_UNSEEN) {
+                    // If the cell is unseen, set the glyph to the default.
+                    glyph = RYCE_DEFAULT_GLYPH;
+                } else if (flags & RYCE_FOV_VISIBLE) {
+                } else {
+                    // Dim the glyph if it’s not visible anymore.
+                    glyph.style.part.fg_color = RYCE_STYLE_COLOR_DEFAULT;
+                    glyph.style.part.style_flags |= RYCE_STYLE_MODIFIER_DIM;
                 }
             }
 
@@ -354,31 +408,36 @@ void render_debug(AppState *app) {
     ryce_pane_set_str(&app->panes.debug, 0, 0, &RYCE_DEFAULT_STYLE, buffer);
 
     // Player Moving.
-    bool is_moving = (app->player_dest.x != app->player.x || app->player_dest.y != app->player.y);
-    RYCE_SNPRINTF(buffer, sizeof(buffer), RYCE_LITERAL("Player moving: %s "), is_moving ? "yes" : "no");
+    bool is_moving = app->loop.tick - app->player.last_move < TICKS_PER_SECOND / DIST_PER_SECOND;
+    RYCE_SNPRINTF(buffer, sizeof(buffer), RYCE_LITERAL("Player moving: %s  "), is_moving ? "yes" : "no");
     ryce_pane_set_str(&app->panes.debug, 0, 1, &RYCE_DEFAULT_STYLE, buffer);
 
-    // Player position.
-    RYCE_SNPRINTF(buffer, sizeof(buffer), RYCE_LITERAL("Position: %lld, %lld, %lld"), app->player.x, -app->player.y,
-                  app->player.z);
+    // Facing.
+    RYCE_SNPRINTF(buffer, sizeof(buffer), RYCE_LITERAL("Mouse: %lld, %lld "), app->player.view.x, app->player.view.y);
     ryce_pane_set_str(&app->panes.debug, 0, 2, &RYCE_DEFAULT_STYLE, buffer);
+
+    // player.pos.
+    RYCE_SNPRINTF(buffer, sizeof(buffer), RYCE_LITERAL("Position: %lld, %lld, %lld  "), app->player.pos.x,
+                  app->player.pos.y, app->player.pos.z);
+    ryce_pane_set_str(&app->panes.debug, 0, 3, &RYCE_DEFAULT_STYLE, buffer);
 }
 
 void render_action(AppState *app) {
     // Set the camera to be centered on the player in the event the player moved.
-    app->camera.center = (RYCE_Vec2){.x = app->player.x, .y = app->player.y};
+    app->camera.center = (RYCE_Vec2){.x = app->player.pos.x, .y = app->player.pos.y};
 
     // For each cell in the TUI, determine which map coordinate to show.
+    bool is_moving = app->loop.tick - app->player.last_move < TICKS_PER_SECOND / DIST_PER_SECOND;
     render_map(app);
 
     // Draw the player at the center of the TUI.
-    RYCE_Vec2 player = ryce_to_terminal(&app->camera, &(RYCE_Vec2){app->player.x, app->player.y});
+    RYCE_Vec2 player = ryce_get_screen_offset(&app->camera, &(RYCE_Vec2){app->player.pos.x, app->player.pos.y});
     ryce_pane_set(&app->panes.map, player.x, player.y, &GLYPHS[6]);
 
-    const bool is_moving = app->player_dest.x != app->player.x || app->player_dest.y != app->player.y;
     if (is_moving) {
         // Draw the player’s destination.
-        RYCE_Vec2 dest_term = ryce_to_terminal(&app->camera, &(RYCE_Vec2){app->player_dest.x, app->player_dest.y});
+        RYCE_Vec2 dest_term =
+            ryce_get_screen_offset(&app->camera, &(RYCE_Vec2){app->player.dest.x, app->player.dest.y});
         ryce_pane_set(&app->panes.map, dest_term.x, dest_term.y, &GLYPHS[7]);
     }
 
@@ -410,7 +469,7 @@ int main(void) {
 
     // Initialize the camera.
     RYCE_Vec2 term_size = get_terminal_size();
-    const RYCE_Vec2 map_center = {.x = (MAP_LENGTH / 2) + 1, .y = (MAP_WIDTH / 2) + 1};
+    const RYCE_Vec2 map_center = {.x = (MAP_MAX_X / 2) + 1, .y = (MAP_MAX_Y / 2) + 1};
     if (ryce_init_camera_ctx(&app.camera, term_size.x, term_size.y, map_center) != RYCE_CAMERA_ERR_NONE) {
         fprintf(stderr, "Failed to init camera.\n");
         return EXIT_FAILURE;
@@ -429,7 +488,7 @@ int main(void) {
     }
 
     // Initialize the debug pane.
-    if (ryce_init_pane(0, term_size.y - 3, 30, 3, &app.tui, &app.panes.debug) != RYCE_TUI_ERR_NONE) {
+    if (ryce_init_pane(0, term_size.y - 4, 30, 4, &app.tui, &app.panes.debug) != RYCE_TUI_ERR_NONE) {
         fprintf(stderr, "Failed to init debug pane.\n");
         return EXIT_FAILURE;
     }
@@ -450,17 +509,17 @@ int main(void) {
     }
 
     // Initialize the 3D map.
-    if (ryce_init_3d_map(&app.map, MAP_LENGTH, MAP_WIDTH, MAP_HEIGHT) != RYCE_MAP_ERR_NONE) {
+    if (ryce_init_3d_map(&app.maps.entity, MAP_MAX_X, MAP_MAX_Y, MAP_MAX_Z) != RYCE_MAP_ERR_NONE) {
         fprintf(stderr, "Failed to init 3D map.\n");
         return EXIT_FAILURE;
     }
 
     // Initialize entities and player.
     init_entities(&app);
-    init_map(&app.map);
-    app.player = init_player(&app);
+    init_map(&app);
+    app.player.pos = init_player(&app);
 
-    // ryce_clear_screen();
+    ryce_clear_screen();
     do {
         input_action(&app);
         tick_action(&app);

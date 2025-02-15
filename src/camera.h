@@ -94,7 +94,7 @@ RYCE_PUBLIC_DECL RYCE_CameraError ryce_init_camera_ctx(RYCE_CameraContext *camer
  * @param position Terminal position.
  * @return RYCE_Vec2 Map position.
  */
-RYCE_PUBLIC_DECL RYCE_Vec2 ryce_from_terminal(RYCE_CameraContext *camera, const RYCE_Vec2 *position);
+RYCE_PUBLIC_DECL RYCE_Vec2 ryce_get_center_offset(RYCE_CameraContext *camera, const RYCE_Vec2 *position);
 
 /**
  * @brief Converts a map position to a terminal position.
@@ -103,7 +103,7 @@ RYCE_PUBLIC_DECL RYCE_Vec2 ryce_from_terminal(RYCE_CameraContext *camera, const 
  * @param position Map position.
  * @return RYCE_Vec2 Terminal position.
  */
-RYCE_PUBLIC_DECL RYCE_Vec2 ryce_to_terminal(RYCE_CameraContext *camera, const RYCE_Vec2 *position);
+RYCE_PUBLIC_DECL RYCE_Vec2 ryce_get_screen_offset(RYCE_CameraContext *camera, const RYCE_Vec2 *position);
 
 /*===========================================================================
    ▗▄▄▄▖▗▖  ▗▖▗▄▄▖ ▗▖   ▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖ ▗▄▖ ▗▄▄▄▖▗▄▄▄▖ ▗▄▖ ▗▖  ▗▖
@@ -133,13 +133,13 @@ RYCE_PUBLIC_DECL RYCE_CameraError ryce_init_camera_ctx(RYCE_CameraContext *camer
     return RYCE_CAMERA_ERR_NONE;
 }
 
-RYCE_PUBLIC_DECL RYCE_Vec2 ryce_from_terminal(RYCE_CameraContext *camera, const RYCE_Vec2 *position) {
+RYCE_PUBLIC_DECL RYCE_Vec2 ryce_get_center_offset(RYCE_CameraContext *camera, const RYCE_Vec2 *position) {
     int64_t map_x = camera->center.x + (position->x - camera->screen.width / 2);
     int64_t map_y = camera->center.y + (position->y - camera->screen.height / 2);
     return (RYCE_Vec2){.x = map_x, .y = map_y};
 }
 
-RYCE_PUBLIC_DECL RYCE_Vec2 ryce_to_terminal(RYCE_CameraContext *camera, const RYCE_Vec2 *position) {
+RYCE_PUBLIC_DECL RYCE_Vec2 ryce_get_screen_offset(RYCE_CameraContext *camera, const RYCE_Vec2 *position) {
     int64_t term_x = (position->x - camera->center.x) + (camera->screen.width / 2);
     int64_t term_y = (position->y - camera->center.y) + (camera->screen.height / 2);
     return (RYCE_Vec2){.x = term_x, .y = term_y};
