@@ -63,6 +63,10 @@ typedef struct AppState {
     RYCE_CameraContext camera;
     RYCE_InputContext input;
     RYCE_TuiContext tui;
+    struct {
+        RYCE_Pane map;
+        RYCE_Pane debug;
+    } panes;
     RYCE_LoopContext loop;
     RYCE_3dTextMap map;
     Entity *entities;
@@ -282,7 +286,7 @@ void input_action(AppState *app) {
                 app->player_dest.x = app->player_dest.x + 1;
                 break;
             case 'c':
-                ryce_clear_pane(&app->tui.panes[0]);
+                ryce_clear_pane(&app->panes.map);
                 break;
             default:
                 break;
@@ -299,8 +303,8 @@ void tick_action(AppState *app) { move_player(app); }
 // --- Render Actions ---------------------------------------------------- //
 // Draws the map onto the TUI pane.
 void render_map(AppState *app) {
-    int pane_width = app->tui.panes[0].view.width;
-    int pane_height = app->tui.panes[0].view.height;
+    int pane_width = app->panes.map.view.width;
+    int pane_height = app->panes.map.view.height;
 
     for (int ty = 0; ty < pane_height; ty++) {
         for (int tx = 0; tx < pane_width; tx++) {
@@ -310,11 +314,10 @@ void render_map(AppState *app) {
             RYCE_Vec2 map_pos = ryce_from_terminal(&app->camera, &term_pos);
             int map_x = map_pos.x;
             int map_y = map_pos.y;
-            size_t tui_idx = ryce_vec2_to_idx(&(RYCE_Vec2){.x = tx, .y = ty}, pane_width);
 
             // Draw the default empty glpyh if outside the map bounds.
             if (map_x < app->map.x.min || map_x > app->map.x.max || map_y < app->map.y.min || map_y > app->map.y.max) {
-                app->tui.panes[0].update[tui_idx] = RYCE_DEFAULT_GLYPH;
+                ryce_pane_set(&app->panes.map, tx, ty, &RYCE_DEFAULT_GLYPH);
                 continue;
             }
 
@@ -338,15 +341,30 @@ void render_map(AppState *app) {
                 }
             }
 
-            app->tui.panes[0].update[tui_idx] = glyph;
+            ryce_pane_set(&app->panes.map, tx, ty, &glyph);
         }
     }
 }
 
-void render_action(AppState *app) {
-    int pane_width = app->tui.panes[0].view.width;
-    int pane_height = app->tui.panes[0].view.height;
+void render_debug(AppState *app) {
+    RYCE_CHAR buffer[128]; // Used to store the debug information.
 
+    // Ticks per Second.
+    RYCE_SNPRINTF(buffer, sizeof(buffer), RYCE_LITERAL("TPS: %.2f  "), app->loop.tps);
+    ryce_pane_set_str(&app->panes.debug, 0, 0, &RYCE_DEFAULT_STYLE, buffer);
+
+    // Player Moving.
+    bool is_moving = (app->player_dest.x != app->player.x || app->player_dest.y != app->player.y);
+    RYCE_SNPRINTF(buffer, sizeof(buffer), RYCE_LITERAL("Player moving: %s "), is_moving ? "yes" : "no");
+    ryce_pane_set_str(&app->panes.debug, 0, 1, &RYCE_DEFAULT_STYLE, buffer);
+
+    // Player position.
+    RYCE_SNPRINTF(buffer, sizeof(buffer), RYCE_LITERAL("Position: %lld, %lld, %lld"), app->player.x, -app->player.y,
+                  app->player.z);
+    ryce_pane_set_str(&app->panes.debug, 0, 2, &RYCE_DEFAULT_STYLE, buffer);
+}
+
+void render_action(AppState *app) {
     // Set the camera to be centered on the player in the event the player moved.
     app->camera.center = (RYCE_Vec2){.x = app->player.x, .y = app->player.y};
 
@@ -355,16 +373,17 @@ void render_action(AppState *app) {
 
     // Draw the player at the center of the TUI.
     RYCE_Vec2 player = ryce_to_terminal(&app->camera, &(RYCE_Vec2){app->player.x, app->player.y});
-    size_t player_idx = ryce_vec2_to_idx(&player, pane_width);
-    app->tui.panes[0].update[player_idx] = GLYPHS[6];
+    ryce_pane_set(&app->panes.map, player.x, player.y, &GLYPHS[6]);
 
     const bool is_moving = app->player_dest.x != app->player.x || app->player_dest.y != app->player.y;
     if (is_moving) {
         // Draw the player’s destination.
         RYCE_Vec2 dest_term = ryce_to_terminal(&app->camera, &(RYCE_Vec2){app->player_dest.x, app->player_dest.y});
-        size_t dest_idx = ryce_vec2_to_idx(&dest_term, pane_width);
-        app->tui.panes[0].update[dest_idx] = GLYPHS[7];
+        ryce_pane_set(&app->panes.map, dest_term.x, dest_term.y, &GLYPHS[7]);
     }
+
+    // Render the debug pane.
+    render_debug(app);
 
     // Render the TUI.
     RYCE_TuiError err_code = ryce_render_tui(&app->tui);
@@ -373,14 +392,6 @@ void render_action(AppState *app) {
         fprintf(stderr, "Failed to render TUI: %d\n\r", err_code);
         lock = 1;
     }
-
-    // Basic debug information.
-    ryce_move_cursor(&app->tui, 0, pane_height - 3);
-    printf("TPS: %.2f   \r\n", app->loop.tps);
-    printf("Player moving: %s   \r\n", is_moving ? "yes" : "no");
-    printf("Position: %" PRId64 ", %" PRId64 ", %" PRId64 "   ", app->player.x, -app->player.y, app->player.z);
-    ryce_move_cursor(&app->tui, app->tui.panes[0].view.width, app->tui.panes[0].view.height);
-    fflush(stdout);
 }
 
 int main(void) {
@@ -411,6 +422,18 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    // Initialize the TUI pane.
+    if (ryce_init_pane(0, 0, term_size.x, term_size.y, &app.tui, &app.panes.map) != RYCE_TUI_ERR_NONE) {
+        fprintf(stderr, "Failed to init TUI pane.\n");
+        return EXIT_FAILURE;
+    }
+
+    // Initialize the debug pane.
+    if (ryce_init_pane(0, term_size.y - 3, 30, 3, &app.tui, &app.panes.debug) != RYCE_TUI_ERR_NONE) {
+        fprintf(stderr, "Failed to init debug pane.\n");
+        return EXIT_FAILURE;
+    }
+
     // Initialize the loop context.
     if (ryce_init_loop_ctx(&lock, TICKS_PER_SECOND, &app.loop) != RYCE_LOOP_ERR_NONE) {
         fprintf(stderr, "Failed to init loop context.\n");
@@ -437,7 +460,7 @@ int main(void) {
     init_map(&app.map);
     app.player = init_player(&app);
 
-    ryce_clear_screen();
+    // ryce_clear_screen();
     do {
         input_action(&app);
         tick_action(&app);
